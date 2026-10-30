@@ -4,7 +4,7 @@
 
 **Author:** Almansur Jumabay, 11th grade, Dostyq School, Astana, Kazakhstan
 
-🌐 **[Live demo](https://autonomous-crosswind-landing.netlify.app)** · 📄 **[Read the technical report (PDF, 7 pages)](Almansur_Crosswind_Project.pdf)** · 📘 [Full technical documentation](docs/TECHNICAL.md)
+🌐 **[Live demo](https://autonomous-crosswind-landing.vercel.app)** · 📄 **[Read the technical report (PDF, 7 pages)](Almansur_Crosswind_Project.pdf)** · 📘 [Full technical documentation](docs/TECHNICAL.md)
 
 ![WebGL mission console replaying simulator telemetry](report/figures/console_chase.png)
 
@@ -71,7 +71,7 @@ npm run dev                       # http://127.0.0.1:5173
 
 Keys: `Space` play/pause, `1`–`4` cameras, `F` airflow overlay, `G` graphics quality.
 
-The live demo is a Netlify build of `src/web`; the settings are in `netlify.toml`.
+The live demo is a Vercel build of `src/web`; the settings are in `src/web/vercel.json`.
 
 Train a policy, or reproduce the report's measurements:
 
