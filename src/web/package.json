@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "ALMA-AUTOLAND: Autonomous 6DoF Crosswind Landing Dynamics & Guidance Framework — WebGL mission control",
-  "author": "Jumabay Almansur",
+  "author": "Almansur Jumabay",
   "type": "module",
   "scripts": {
     "dev": "vite",

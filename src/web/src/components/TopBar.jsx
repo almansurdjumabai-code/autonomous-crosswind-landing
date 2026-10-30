@@ -77,7 +77,7 @@ export default function TopBar() {
         <div className="hidden items-center gap-2 border border-line px-2.5 py-1.5 sm:flex">
           <span className="inline-block h-2.5 w-3.5 bg-[#00afca]" aria-hidden="true" />
           <span className="readout text-[11px] tracking-[0.14em] text-ink-dim">
-            CHIEF ARCHITECT: <span className="text-ink">JUMABAY ALMANSUR</span> <span className="text-data">[KZ]</span>
+            CHIEF ARCHITECT: <span className="text-ink">ALMANSUR JUMABAY</span> <span className="text-data">[KZ]</span>
           </span>
         </div>
         <button
