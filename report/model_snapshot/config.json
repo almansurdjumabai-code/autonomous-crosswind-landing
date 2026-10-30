@@ -1,0 +1,289 @@
+{
+  "train": {
+    "run_dir": "runs\\ppo_residual_resume1",
+    "total_timesteps": 4750000,
+    "n_envs": 4,
+    "seed": 42,
+    "device": "auto",
+    "vec_env": "subproc",
+    "max_wind_speed_mps": 10.0,
+    "curriculum_start": 0.2,
+    "curriculum_steps": 2000000,
+    "eval_freq_steps": 50000,
+    "n_eval_episodes": 20,
+    "checkpoint_freq_steps": 250000,
+    "resume_from": "runs\\ppo_residual\\checkpoints\\ppo_landing_250000_steps.zip",
+    "action_mode": "residual",
+    "residual_scale": 0.3,
+    "ppo": {
+      "learning_rate": 0.0003,
+      "final_learning_rate": 1e-05,
+      "lr_schedule": "cosine",
+      "lr_warmup_fraction": 0.02,
+      "n_steps": 1024,
+      "batch_size": 512,
+      "n_epochs": 10,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "final_clip_range": 0.08,
+      "ent_coef": 0.0,
+      "vf_coef": 0.5,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.03,
+      "log_std_init": -1.6,
+      "net_arch_pi": [
+        256,
+        256
+      ],
+      "net_arch_vf": [
+        256,
+        256
+      ],
+      "activation": "tanh"
+    }
+  },
+  "env": {
+    "aircraft": {
+      "mass_kg": 1043.0,
+      "inertia_kgm2": [
+        [
+          1285.3,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1824.9,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          2666.9
+        ]
+      ],
+      "wing_area_m2": 16.2,
+      "span_m": 10.92,
+      "chord_m": 1.49,
+      "oswald_efficiency": 0.8,
+      "wing_height_above_cg_m": 1.0,
+      "CL0": 0.31,
+      "CL_alpha": 5.143,
+      "CL_q": 3.9,
+      "CL_de": 0.43,
+      "CD0": 0.031,
+      "CD_beta": 0.17,
+      "CD_de": 0.06,
+      "alpha_stall_rad": 0.28,
+      "stall_blend_rate": 50.0,
+      "Cm0": -0.015,
+      "Cm_alpha": -0.89,
+      "Cm_q": -12.4,
+      "Cm_de": -1.28,
+      "CY_beta": -0.31,
+      "CY_p": -0.037,
+      "CY_r": 0.21,
+      "CY_dr": 0.187,
+      "Cl_beta": -0.089,
+      "Cl_p": -0.47,
+      "Cl_r": 0.096,
+      "Cl_da": 0.178,
+      "Cl_dr": 0.0147,
+      "Cn_beta": 0.065,
+      "Cn_p": -0.03,
+      "Cn_r": -0.099,
+      "Cn_da": -0.053,
+      "Cn_dr": -0.0657,
+      "thrust_static_n": 2200.0,
+      "prop_zero_thrust_speed_mps": 110.0,
+      "elevator_limit_rad": 0.4363323129985824,
+      "aileron_limit_rad": 0.3490658503988659,
+      "rudder_limit_rad": 0.4363323129985824,
+      "surface_time_constant_s": 0.06,
+      "throttle_time_constant_s": 0.4,
+      "surface_rate_limit_rps": 1.3962634015954636,
+      "throttle_rate_limit_ps": 1.0,
+      "gear": [
+        {
+          "name": "nose",
+          "position_body": [
+            1.3,
+            0.0,
+            0.9
+          ],
+          "stiffness_n_per_m": 30000.0,
+          "damping_ns_per_m": 3000.0,
+          "is_main": false,
+          "steerable": true
+        },
+        {
+          "name": "main_left",
+          "position_body": [
+            -0.3,
+            -1.2,
+            1.0
+          ],
+          "stiffness_n_per_m": 40000.0,
+          "damping_ns_per_m": 4000.0,
+          "is_main": true,
+          "steerable": false
+        },
+        {
+          "name": "main_right",
+          "position_body": [
+            -0.3,
+            1.2,
+            1.0
+          ],
+          "stiffness_n_per_m": 40000.0,
+          "damping_ns_per_m": 4000.0,
+          "is_main": true,
+          "steerable": false
+        }
+      ],
+      "structural_points": [
+        [
+          "wingtip_left",
+          [
+            -0.3,
+            -5.46,
+            -0.6
+          ]
+        ],
+        [
+          "wingtip_right",
+          [
+            -0.3,
+            5.46,
+            -0.6
+          ]
+        ],
+        [
+          "tail",
+          [
+            -4.5,
+            0.0,
+            0.0
+          ]
+        ]
+      ],
+      "rolling_friction": 0.03,
+      "cornering_friction": 0.7,
+      "friction_velocity_scale_mps": 0.3,
+      "nose_steer_limit_rad": 0.17453292519943295
+    },
+    "runway": {
+      "length_m": 1600.0,
+      "width_m": 30.0,
+      "aim_point_m": 300.0,
+      "glideslope_rad": 0.05235987755982989,
+      "field_elevation_m": 0.0
+    },
+    "wind": {
+      "max_wind_speed_mps": 10.0,
+      "wind_from_min_rad": 0.5235987755982988,
+      "wind_from_max_rad": 2.6179938779914944,
+      "shear_exponent": 0.14285714285714285,
+      "veer_rad_per_100m": 0.13962634015954636,
+      "turbulence_enabled": true,
+      "turbulence_scale": 1.0,
+      "gusts_enabled": true,
+      "gust_rate_hz": 0.05,
+      "gust_amplitude_fraction": 0.6,
+      "gust_min_amplitude_mps": 1.0,
+      "gust_length_range_m": [
+        30.0,
+        120.0
+      ],
+      "gust_vertical_fraction": 0.3
+    },
+    "reward": {
+      "gamma": 0.99,
+      "w_glideslope": 2.0,
+      "w_localizer": 2.0,
+      "w_progress": 1.0,
+      "glideslope_tol_base_m": 4.0,
+      "glideslope_tol_per_m": 0.03,
+      "localizer_tol_base_m": 6.0,
+      "localizer_tol_per_m": 0.02,
+      "progress_scale_m": 1000.0,
+      "roll_limit_rad": 0.4363323129985824,
+      "pitch_min_rad": -0.17453292519943295,
+      "pitch_max_rad": 0.2617993877991494,
+      "w_attitude_envelope": 2.0,
+      "w_attitude_low_alt": 0.05,
+      "low_alt_threshold_m": 15.0,
+      "w_rates": 0.01,
+      "w_airspeed": 0.01,
+      "airspeed_tol_mps": 4.0,
+      "alpha_warning_rad": 0.20943951023931956,
+      "w_alpha": 5.0,
+      "w_effort": 0.002,
+      "w_effort_rate": 0.02,
+      "w_decrab": 0.05,
+      "w_rollout_centerline": 0.05,
+      "w_flare_sink": 0.4,
+      "flare_height_m": 12.0,
+      "flare_sink_target_mps": -0.8,
+      "max_dense_penalty_per_step": 5.0,
+      "crash_sink_rate_mps": -1.5,
+      "ideal_sink_rate_mps": -0.3,
+      "sink_rate_sigma_mps": 0.5,
+      "touchdown_x_sigma_m": 150.0,
+      "touchdown_reward": 100.0,
+      "touchdown_weights": [
+        0.4,
+        0.3,
+        0.2,
+        0.1
+      ],
+      "crab_sigma_rad": 0.08726646259971647,
+      "rollout_success_bonus": 50.0,
+      "crash_penalty": -100.0,
+      "crash_excess_sink_scale": 20.0,
+      "crash_excess_sink_cap_mps": 10.0
+    },
+    "physics_dt": 0.01,
+    "control_dt": 0.05,
+    "max_episode_s": 150.0,
+    "rollout_time_s": 3.0,
+    "approach_speed_mps": 33.0,
+    "start_distance_range_m": [
+      1500.0,
+      2200.0
+    ],
+    "start_lateral_range_m": [
+      -40.0,
+      40.0
+    ],
+    "start_height_sigma_m": 6.0,
+    "start_heading_range_rad": [
+      -0.13962634015954636,
+      0.13962634015954636
+    ],
+    "start_roll_range_rad": [
+      -0.08726646259971647,
+      0.08726646259971647
+    ],
+    "start_airspeed_range_mps": [
+      -2.0,
+      2.0
+    ],
+    "trim_referenced_actions": true,
+    "action_mode": "residual",
+    "residual_scale": 0.3,
+    "max_bank_rad": 1.2217304763960306,
+    "max_pitch_rad": 0.6981317007977318,
+    "min_airspeed_mps": 18.0,
+    "max_airspeed_mps": 70.0,
+    "max_lateral_m": 400.0,
+    "max_height_m": 500.0,
+    "min_fuselage_height_m": 0.25
+  },
+  "versions": {
+    "python": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "torch": "2.14.1+cpu",
+    "numpy": "2.5.4"
+  }
+}

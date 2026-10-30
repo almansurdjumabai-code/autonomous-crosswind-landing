@@ -1,0 +1,23 @@
+[
+ {
+  "controller": "pid",
+  "decide_ms_mean": 0.07542216667388857,
+  "decide_ms_p99": 0.20668500016654398,
+  "env_step_ms_mean": 2.8314966666630426,
+  "samples": 600
+ },
+ {
+  "controller": "ppo_rta",
+  "decide_ms_mean": 0.43242933331081684,
+  "decide_ms_p99": 0.9271239998997771,
+  "env_step_ms_mean": 2.5633761666919477,
+  "samples": 600
+ },
+ {
+  "controller": "ppo_raw",
+  "decide_ms_mean": 0.4110364999799761,
+  "decide_ms_p99": 0.9476989997165217,
+  "env_step_ms_mean": 2.7337485000028514,
+  "samples": 600
+ }
+]

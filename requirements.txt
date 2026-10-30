@@ -1,0 +1,10 @@
+# Versions resolved and verified together on Python 3.12 (full test suite + training smoke run).
+gymnasium==1.4.0
+torch==2.14.1
+stable-baselines3==2.9.2
+numpy==2.5.4
+scipy==1.18.1
+matplotlib==3.11.2
+pandas==3.1.0
+pytest==9.1.1
+tensorboard==2.21.0

@@ -1,0 +1,32 @@
+{
+  "name": "alma-autoland-mission-control",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ALMA-AUTOLAND: Autonomous 6DoF Crosswind Landing Dynamics & Guidance Framework — WebGL mission control",
+  "author": "Jumabay Almansur",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
+    "@react-three/postprocessing": "^3.2.2",
+    "@tailwindcss/vite": "^4.3.3",
+    "framer-motion": "^14.7.1",
+    "lucide-react": "^1.64.0",
+    "postprocessing": "^6.39.5",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.3",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.5"
+  }
+}

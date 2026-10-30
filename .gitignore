@@ -1,0 +1,48 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node / web build
+node_modules/
+dist/
+
+# Training output: checkpoints, TensorBoard events, monitor logs (tens of MB, regenerable)
+runs/
+
+# Generated results, except the demo telemetry the Blender export starts from
+results/*
+!results/telemetry_demo/
+
+# Raw logs
+*.log
+
+# Local backups and upload bundles
+_backup_*/
+*_overleaf.zip
+
+# Blender autosaves and render sidecars (these record local absolute paths)
+# Blender files (compressed, may embed local paths; the model is rebuilt by src/viz/airliner_model.py)
+*.blend
+*.blend1
+renders/*.timeline.json
+
+# Raw experiment traces (11 MB, regenerate with src/viz/report_experiment.py); summaries stay
+report/data/gust.json
+
+# LaTeX by-products
+*.aux
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/

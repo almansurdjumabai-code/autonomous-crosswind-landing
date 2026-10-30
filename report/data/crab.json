@@ -1,0 +1,32 @@
+[
+ {
+  "wind_mps": 2.5,
+  "measured_deg": 5.72473138005518,
+  "predicted_deg": 5.653052429968507
+ },
+ {
+  "wind_mps": 5.0,
+  "measured_deg": 11.420472190248187,
+  "predicted_deg": 11.237192024965172
+ },
+ {
+  "wind_mps": 7.5,
+  "measured_deg": 17.177562326389026,
+  "predicted_deg": 16.797246966978452
+ },
+ {
+  "wind_mps": 10.0,
+  "measured_deg": 22.99340597824661,
+  "predicted_deg": 22.36949957528996
+ },
+ {
+  "wind_mps": 12.5,
+  "measured_deg": 28.897184486012062,
+  "predicted_deg": 27.96755656498073
+ },
+ {
+  "wind_mps": 15.0,
+  "measured_deg": 34.96478346181729,
+  "predicted_deg": 33.61376659377521
+ }
+]

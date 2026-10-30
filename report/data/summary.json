@@ -1,0 +1,275 @@
+{
+ "sweep": [
+  {
+   "controller": "pid",
+   "wind_mps": 0.0,
+   "n": 30,
+   "success": 30,
+   "touched": 30,
+   "y_abs_mean": 1.7482904288149177,
+   "y_abs_p95": 3.214932538846917,
+   "y_rms_mean": 2.003030547402246,
+   "sink_mean": -0.4959656213169526,
+   "load_mean": 0.12320769600458502,
+   "load_p95": 0.23336045518142082,
+   "authority": 0.0,
+   "reasons": {}
+  },
+  {
+   "controller": "pid",
+   "wind_mps": 5.0,
+   "n": 30,
+   "success": 30,
+   "touched": 30,
+   "y_abs_mean": 1.7832066100171953,
+   "y_abs_p95": 3.4381462180167772,
+   "y_rms_mean": 2.4555243788969494,
+   "sink_mean": -0.6491553935210616,
+   "load_mean": 0.33510110747388855,
+   "load_p95": 0.5349672102877038,
+   "authority": 0.0,
+   "reasons": {}
+  },
+  {
+   "controller": "pid",
+   "wind_mps": 10.0,
+   "n": 30,
+   "success": 19,
+   "touched": 30,
+   "y_abs_mean": 1.7580570256417987,
+   "y_abs_p95": 3.022286498284977,
+   "y_rms_mean": 3.1118457176646097,
+   "sink_mean": -1.399668436049144,
+   "load_mean": 0.5119293234078502,
+   "load_p95": 0.9086277324001096,
+   "authority": 0.0,
+   "reasons": {
+    "hard_landing": 11
+   }
+  },
+  {
+   "controller": "pid",
+   "wind_mps": 15.0,
+   "n": 30,
+   "success": 14,
+   "touched": 30,
+   "y_abs_mean": 2.717981049140823,
+   "y_abs_p95": 4.736766455781116,
+   "y_rms_mean": 3.1505100154842154,
+   "sink_mean": -2.049380842552246,
+   "load_mean": 0.8013727189107474,
+   "load_p95": 1.707810073617511,
+   "authority": 0.0,
+   "reasons": {
+    "hard_landing": 16
+   }
+  },
+  {
+   "controller": "pid",
+   "wind_mps": 20.0,
+   "n": 30,
+   "success": 4,
+   "touched": 20,
+   "y_abs_mean": 2.9356359864682604,
+   "y_abs_p95": 6.088346408632848,
+   "y_rms_mean": 4.000073714246816,
+   "sink_mean": -3.921284037798506,
+   "load_mean": 1.1557812865554677,
+   "load_p95": 2.3535484263774777,
+   "authority": 0.0,
+   "reasons": {
+    "hard_landing": 16,
+    "lateral_out_of_bounds": 10
+   }
+  },
+  {
+   "controller": "ppo_rta",
+   "wind_mps": 0.0,
+   "n": 30,
+   "success": 30,
+   "touched": 30,
+   "y_abs_mean": 1.70220523159832,
+   "y_abs_p95": 3.2796098361590085,
+   "y_rms_mean": 1.9284228411742153,
+   "sink_mean": -0.5036860946118877,
+   "load_mean": 0.15434285877819143,
+   "load_p95": 0.24062029386967718,
+   "authority": 0.7777088039763584,
+   "reasons": {}
+  },
+  {
+   "controller": "ppo_rta",
+   "wind_mps": 5.0,
+   "n": 30,
+   "success": 30,
+   "touched": 30,
+   "y_abs_mean": 1.6849811063243234,
+   "y_abs_p95": 3.8612243594210383,
+   "y_rms_mean": 2.156398102698476,
+   "sink_mean": -0.619101246176312,
+   "load_mean": 0.32770980142826,
+   "load_p95": 0.5057497136471478,
+   "authority": 0.7147908032310045,
+   "reasons": {}
+  },
+  {
+   "controller": "ppo_rta",
+   "wind_mps": 10.0,
+   "n": 30,
+   "success": 19,
+   "touched": 30,
+   "y_abs_mean": 1.720829619404301,
+   "y_abs_p95": 2.9552822955731712,
+   "y_rms_mean": 2.9866290001403564,
+   "sink_mean": -1.3935654882617974,
+   "load_mean": 0.5048895312850517,
+   "load_p95": 0.8793368253948806,
+   "authority": 0.643446523683156,
+   "reasons": {
+    "hard_landing": 11
+   }
+  },
+  {
+   "controller": "ppo_rta",
+   "wind_mps": 15.0,
+   "n": 30,
+   "success": 13,
+   "touched": 30,
+   "y_abs_mean": 2.84598786928471,
+   "y_abs_p95": 4.697594980367921,
+   "y_rms_mean": 3.158997931376891,
+   "sink_mean": -2.0391490643058146,
+   "load_mean": 0.7429014859621806,
+   "load_p95": 1.672327445588093,
+   "authority": 0.39103147047138137,
+   "reasons": {
+    "hard_landing": 17
+   }
+  },
+  {
+   "controller": "ppo_rta",
+   "wind_mps": 20.0,
+   "n": 30,
+   "success": 5,
+   "touched": 20,
+   "y_abs_mean": 2.907392164174778,
+   "y_abs_p95": 6.109788612857933,
+   "y_rms_mean": 3.9175945902873712,
+   "sink_mean": -3.5897499462126463,
+   "load_mean": 1.2343416441602217,
+   "load_p95": 2.4083789084458065,
+   "authority": 0.09048175080236222,
+   "reasons": {
+    "hard_landing": 15,
+    "lateral_out_of_bounds": 10
+   }
+  },
+  {
+   "controller": "ppo_raw",
+   "wind_mps": 0.0,
+   "n": 30,
+   "success": 30,
+   "touched": 30,
+   "y_abs_mean": 1.7677735917716935,
+   "y_abs_p95": 3.6258601198953264,
+   "y_rms_mean": 1.9463804427324038,
+   "sink_mean": -0.2746355193895124,
+   "load_mean": 0.2426385835662763,
+   "load_p95": 0.33057477391308965,
+   "authority": 1.0,
+   "reasons": {}
+  },
+  {
+   "controller": "ppo_raw",
+   "wind_mps": 5.0,
+   "n": 30,
+   "success": 30,
+   "touched": 30,
+   "y_abs_mean": 1.6368613110877812,
+   "y_abs_p95": 3.996695572111858,
+   "y_rms_mean": 1.9958709933034993,
+   "sink_mean": -0.6761791099201703,
+   "load_mean": 0.31958472599750787,
+   "load_p95": 0.5895066461585146,
+   "authority": 1.0,
+   "reasons": {}
+  },
+  {
+   "controller": "ppo_raw",
+   "wind_mps": 10.0,
+   "n": 30,
+   "success": 22,
+   "touched": 30,
+   "y_abs_mean": 1.6852155872895567,
+   "y_abs_p95": 2.4080766122016124,
+   "y_rms_mean": 2.657818263614025,
+   "sink_mean": -1.2294709806992354,
+   "load_mean": 0.4514041130164779,
+   "load_p95": 0.9241163577787702,
+   "authority": 1.0,
+   "reasons": {
+    "hard_landing": 8
+   }
+  }
+ ],
+ "gust": [
+  {
+   "controller": "pid",
+   "n": 20,
+   "success": 19,
+   "touched": 20,
+   "reasons": {
+    "hard_landing": 1
+   },
+   "peak_y_median": 2.7664206389096964,
+   "peak_y_max": 4.654974993818514,
+   "peak_phi_median": 7.663271682955513,
+   "recovery_median": 0.0,
+   "recovery_p90": 0.0,
+   "reaction_median": 1.4600000000002282,
+   "duration": 3.5211588429110217
+  },
+  {
+   "controller": "ppo_rta",
+   "n": 20,
+   "success": 19,
+   "touched": 20,
+   "reasons": {
+    "hard_landing": 1
+   },
+   "peak_y_median": 2.9880170573884968,
+   "peak_y_max": 4.31017645355708,
+   "peak_phi_median": 7.12697198906675,
+   "recovery_median": 0.0,
+   "recovery_p90": 0.0,
+   "reaction_median": 1.3900000000002173,
+   "duration": 3.519695306953423
+  },
+  {
+   "controller": "ppo_raw",
+   "n": 20,
+   "success": 20,
+   "touched": 20,
+   "reasons": {},
+   "peak_y_median": 2.581688079461176,
+   "peak_y_max": 5.561238300428769,
+   "peak_phi_median": 7.222601240295455,
+   "recovery_median": 0.0,
+   "recovery_p90": 0.0,
+   "reaction_median": 1.4000000000002188,
+   "duration": 3.518718338565578
+  }
+ ],
+ "training": {
+  "Absolute PPO (ppo_crosswind)": {
+   "n": 29,
+   "last_step": 1450000,
+   "last_median": 148.8970050613425
+  },
+  "Residual PPO (ppo_residual)": {
+   "n": 33,
+   "last_step": 1650000,
+   "last_median": 94.5804669114732
+  }
+ }
+}
