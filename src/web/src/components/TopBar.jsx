@@ -1,5 +1,6 @@
 import { PanelLeft, PanelRight } from "lucide-react";
 import { ui, useClock, useUI } from "../lib/store.js";
+import { aircraftLimits } from "../lib/flightData.js";
 
 function Glyph() {
   return (
@@ -19,7 +20,7 @@ function SystemStatus() {
   const loading = useUI((s) => s.loading);
   const error = useUI((s) => s.error);
   const clk = useClock(4);
-  const name = { ppo: "PPO MODEL", ppo_raw: "PPO MODEL (UNPROTECTED)", pid: "PID AUTOLAND" }[controller] ?? "PPO MODEL";
+  const name = { ppo: "PPO MODEL", ppo_raw: "PPO MODEL (UNPROTECTED)", pid: "PID AUTOLAND" }[controller] ?? "AUTOLAND";
   let dot = "bg-hud";
   let text = `LIVE TELEMETRY // ${name}: ACTIVE`;
   if (controller === "ppo" && clk.sample && clk.sample.authority < 0.5) {
@@ -44,6 +45,18 @@ function SystemStatus() {
   );
 }
 
+function AircraftBadge() {
+  const lim = aircraftLimits(useUI((s) => s.manifest));
+  return (
+    <div className="hidden items-center gap-2 border border-line px-2.5 py-1.5 sm:flex" title="Airframe of the loaded data set">
+      <span className="inline-block h-2.5 w-3.5 bg-[#00afca]" aria-hidden="true" />
+      <span className="readout text-[11px] tracking-[0.14em] text-ink-dim">
+        AIRFRAME: <span className="text-ink">{lim.name.toUpperCase()}</span> <span className="text-data">VREF {lim.vrefKt.toFixed(0)} KT</span>
+      </span>
+    </div>
+  );
+}
+
 export default function TopBar() {
   const showLeft = useUI((s) => s.showLeft);
   const showRight = useUI((s) => s.showRight);
@@ -62,9 +75,9 @@ export default function TopBar() {
         <Glyph />
         <div className="leading-none">
           <div className="readout text-[13px] font-bold tracking-[0.2em] text-ink">
-            ALMA-AUTOLAND <span className="text-ink-mute">|</span> <span className="font-medium text-ink-dim">6DoF FLIGHT DYNAMICS</span>
+            CROSSWIND AUTOLAND <span className="text-ink-mute">|</span> <span className="font-medium text-ink-dim">6DoF FLIGHT DYNAMICS</span>
           </div>
-          <div className="label mt-1 hidden text-[9px] md:block">Autonomous crosswind landing dynamics &amp; guidance framework</div>
+          <div className="label mt-1 hidden text-[9px] md:block">ATR 72 autonomous crosswind landing · classical autoland, residual PPO, runtime assurance</div>
         </div>
       </div>
       <div className="mx-auto hidden lg:block">
@@ -74,12 +87,7 @@ export default function TopBar() {
         <div className="lg:hidden">
           <SystemStatus />
         </div>
-        <div className="hidden items-center gap-2 border border-line px-2.5 py-1.5 sm:flex">
-          <span className="inline-block h-2.5 w-3.5 bg-[#00afca]" aria-hidden="true" />
-          <span className="readout text-[11px] tracking-[0.14em] text-ink-dim">
-            CHIEF ARCHITECT: <span className="text-ink">ALMANSUR JUMABAY</span> <span className="text-data">[KZ]</span>
-          </span>
-        </div>
+        <AircraftBadge />
         <button
           type="button"
           onClick={() => ui.set({ showRight: !showRight })}

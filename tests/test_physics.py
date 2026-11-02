@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from src.env.aircraft_env import (
+    AIRCRAFT_PRESETS,
     G0,
     IDX_OMEGA,
     IDX_QUAT,
@@ -207,9 +208,12 @@ def test_dryden_turbulence_has_specified_variance():
 
 
 # ----------------------------------------------------------------------------- aircraft model
-@pytest.fixture(scope="module")
-def env() -> CrosswindLandingEnv:
-    return CrosswindLandingEnv()
+PRESETS = tuple(AIRCRAFT_PRESETS)
+
+
+@pytest.fixture(scope="module", params=PRESETS)
+def env(request) -> CrosswindLandingEnv:
+    return CrosswindLandingEnv(make_env_config(request.param))
 
 
 def test_trim_is_an_equilibrium(env):
@@ -242,7 +246,7 @@ def test_landing_gear_static_equilibrium(env):
     env.reset(seed=0, options={"wind_speed_mps": 0.0, "turbulence": False, "gusts": False})
     ac = env.cfg.aircraft
     x = np.zeros(STATE_DIM)
-    x[2] = -1.0  # CG 1 m above ground: gear struts just touching
+    x[2] = -ac.wheel_height_m  # main gear struts just touching
     x[IDX_QUAT] = euler_to_quat(0.0, 0.0, 0.0)
     env.mean_wind = MeanWindProfile(0.0, 0.0, 1.0 / 7.0, 0.0)
     env._gust_turb_ned = np.zeros(3)
@@ -322,13 +326,16 @@ def test_integration_step_converges_during_extreme_discrete_gust():
     assert np.linalg.norm(coarse[IDX_OMEGA] - fine[IDX_OMEGA]) < 0.1
 
 
-def test_hard_landing_is_detected_as_crash():
-    env = CrosswindLandingEnv()
+@pytest.mark.parametrize("aircraft", PRESETS)
+def test_hard_landing_is_detected_as_crash(aircraft):
+    env = CrosswindLandingEnv(make_env_config(aircraft))
     env.reset(seed=0, options={"wind_speed_mps": 0.0, "turbulence": False, "gusts": False})
-    env.state[0:3] = [300.0, 0.0, -1.3]  # just above the runway at the aim point
+    ac = env.cfg.aircraft
+    env.state[0:3] = [300.0, 0.0, -(ac.wheel_height_m + 0.3)]  # wheels 30 cm above the aim point
     env.state[IDX_QUAT] = euler_to_quat(0.0, math.radians(3.0), 0.0)
     r = quat_to_dcm(env.state[IDX_QUAT])
-    env.state[IDX_VEL] = r.T @ np.array([30.0, 0.0, 3.0])  # 3 m/s sink
+    v = env.cfg.approach_speed_mps
+    env.state[IDX_VEL] = r.T @ np.array([v, 0.0, 4.0])  # 4 m/s sink: beyond every preset's limit
     terminated = False
     for _ in range(40):
         _, reward, terminated, _, info = env.step(np.zeros(4, dtype=np.float32))
@@ -336,7 +343,7 @@ def test_hard_landing_is_detected_as_crash():
             break
     assert terminated
     assert info["crash_reason"] == "hard_landing"
-    assert info["episode_metrics"]["touchdown_sink_rate_mps"] < -1.5
+    assert info["episode_metrics"]["touchdown_sink_rate_mps"] < env.cfg.reward.crash_sink_rate_mps
     assert reward <= env.cfg.reward.crash_penalty
 
 
@@ -403,10 +410,11 @@ def _fly(env, controller, max_steps=4000):
     return info["episode_metrics"]
 
 
-def test_classical_autoland_lands_in_steady_crosswind_with_residual_crab():
+@pytest.mark.parametrize("aircraft", PRESETS)
+def test_classical_autoland_lands_in_steady_crosswind_with_residual_crab(aircraft):
     from src.agents.baseline_autopilot import ClassicalAutopilot
 
-    env = CrosswindLandingEnv(make_env_config(turbulence_enabled=False, gusts_enabled=False))
+    env = CrosswindLandingEnv(make_env_config(aircraft, turbulence_enabled=False, gusts_enabled=False))
     ap = None
 
     def ctrl(obs):
@@ -417,16 +425,17 @@ def test_classical_autoland_lands_in_steady_crosswind_with_residual_crab():
 
     m = _fly(env, ctrl)
     assert m["success"] == 1.0
-    assert -1.5 < m["touchdown_sink_rate_mps"] < 0.0
+    assert env.cfg.reward.crash_sink_rate_mps < m["touchdown_sink_rate_mps"] < 0.0
     assert abs(m["touchdown_y_m"]) < 5.0
     assert abs(m["touchdown_crab_deg"]) < 10.0
 
 
-def test_safety_supervisor_recovers_an_adversarial_policy():
+@pytest.mark.parametrize("aircraft", PRESETS)
+def test_safety_supervisor_recovers_an_adversarial_policy(aircraft):
     """A policy that commands full right roll and full nose-down must be overridden."""
     from src.agents.safety_supervisor import SafetySupervisor
 
-    env = CrosswindLandingEnv(make_env_config(turbulence_enabled=False, gusts_enabled=False))
+    env = CrosswindLandingEnv(make_env_config(aircraft, turbulence_enabled=False, gusts_enabled=False))
     bad = lambda obs: np.array([1.0, 1.0, 0.0, -1.0], dtype=np.float32)  # noqa: E731
     holder = {}
 
@@ -445,11 +454,12 @@ def test_safety_supervisor_recovers_an_adversarial_policy():
     assert m["success"] == 1.0
 
 
-def test_safety_supervisor_leaves_a_safe_policy_in_command():
+@pytest.mark.parametrize("aircraft", PRESETS)
+def test_safety_supervisor_leaves_a_safe_policy_in_command(aircraft):
     from src.agents.baseline_autopilot import ClassicalAutopilot
     from src.agents.safety_supervisor import SafetySupervisor
 
-    env = CrosswindLandingEnv(make_env_config(turbulence_enabled=False, gusts_enabled=False))
+    env = CrosswindLandingEnv(make_env_config(aircraft, turbulence_enabled=False, gusts_enabled=False))
     env.reset(seed=7, options={"wind_speed_mps": 0.0, "start_y_m": 0.0})
     good = ClassicalAutopilot(env)
     rta = SafetySupervisor(env, lambda obs: good.act())
@@ -458,7 +468,8 @@ def test_safety_supervisor_leaves_a_safe_policy_in_command():
     assert rta.authority == 1.0 and rta.reason is None
 
 
-def test_residual_mode_with_zero_action_reproduces_the_autoland():
-    env = CrosswindLandingEnv(make_env_config(action_mode="residual", turbulence_enabled=False, gusts_enabled=False))
+@pytest.mark.parametrize("aircraft", PRESETS)
+def test_residual_mode_with_zero_action_reproduces_the_autoland(aircraft):
+    env = CrosswindLandingEnv(make_env_config(aircraft, action_mode="residual", turbulence_enabled=False, gusts_enabled=False))
     m = _fly(env, lambda obs: np.zeros(4, dtype=np.float32))
     assert m["success"] == 1.0

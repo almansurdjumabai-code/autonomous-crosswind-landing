@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Crosshair, Download, Hand, Pause, Play, Power, RotateCcw, Video } from "lucide-react";
+import { Crosshair, Download, Hand, Pause, Play, Plane, Power, RotateCcw, Video } from "lucide-react";
 import { useProgress } from "@react-three/drei";
 import { CAMERAS, clock, QUALITY, seek, setQuality, ui, useClock, useUI } from "../lib/store.js";
-import { CONTROLLERS, M_TO_FT, MPS_TO_KT, outcomeLabel, rawEpisode, snapScenario } from "../lib/flightData.js";
+import { AIRCRAFT, aircraftLimits, availableControllers, M_TO_FT, MPS_TO_KT, outcomeLabel, rawEpisode, snapScenario } from "../lib/flightData.js";
 import { AoAGauge, AttitudeIndicator, CockpitHUD, HeadingTape, SlipIndicator, VerticalSpeed, VerticalTape } from "./avionics.jsx";
 import TelemetryCharts from "./Charts.jsx";
 
@@ -78,12 +78,13 @@ function CommandButton({ icon: Icon, label, onClick, tone = "neutral", active = 
 /* ---------------------------------------------------------------------------------------------- */
 function exportTelemetry() {
   const st = ui.get();
-  const raw = st.scenarioId ? rawEpisode(st.scenarioId) : null;
+  const raw = st.scenarioId ? rawEpisode(st.manifest, st.scenarioId) : null;
   if (!raw) return;
   const doc = {
     exported_utc: new Date().toISOString(),
-    project: "ALMA-AUTOLAND",
-    exported_by: "ALMA-AUTOLAND mission control",
+    project: "AUTONOMOUS-CROSSWIND-LANDING",
+    exported_by: "crosswind autoland mission console",
+    aircraft: st.manifest?.aircraft ?? null,
     scenario: { controller: st.controller, crosswind_kt: raw.crosswind_kt, gust_pct: raw.gust_pct, glidepath_deg: raw.glidepath_deg },
     playback_time_s: clock.t,
     frame: "three.js / glTF: +X east, +Y up, +Z south; runway threshold at origin",
@@ -92,7 +93,7 @@ function exportTelemetry() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(doc)], { type: "application/json" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `alma-autoland_${raw.id}.json`;
+  a.download = `${st.manifest?.aircraftId ?? "rollout"}_${raw.id}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -102,15 +103,40 @@ function ControlPanel() {
   const snap = st.manifest ? snapScenario(st.manifest, st.controller, st.crosswindKt, st.gustPct, st.glidepathDeg) : null;
   const outcome = outcomeLabel(st.episode?.metrics);
   const m = st.episode?.metrics;
+  const lim = aircraftLimits(st.manifest);
+  const controllers = availableControllers(st.manifest);
+  const learned = controllers.some((c) => c.id === "ppo");
+  const xwMax = Math.max(30, ...(st.manifest?.grid?.crosswind_kt ?? []));
   const engage = () => {
     if (clock.t >= (st.episode?.tEnd ?? Infinity) - 0.05) seek(0);
-    ui.set({ controller: "ppo", autopilot: "ENGAGED", playing: true });
+    ui.set({ controller: learned ? "ppo" : "pid", autopilot: "ENGAGED", playing: true });
   };
   return (
     <aside className="glass pointer-events-auto flex h-full flex-col overflow-y-auto [scrollbar-width:thin]" aria-label="Mission controls">
+      <Section title="Aircraft" aside={<span className="readout text-[10px] text-ink-mute">V<sub>REF</sub> {lim.vrefKt.toFixed(0)} KT · {(lim.massKg / 1000).toFixed(1)} T</span>}>
+        <div className="grid grid-cols-2 border border-line" role="radiogroup" aria-label="Aircraft">
+          {AIRCRAFT.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              role="radio"
+              title={a.hint}
+              aria-checked={st.aircraft === a.id}
+              onClick={() => ui.set({ aircraft: a.id })}
+              className={`readout flex min-h-9 items-center justify-center gap-1.5 px-1 text-[10px] tracking-[0.08em] ${st.aircraft === a.id ? "bg-data/15 text-data" : "text-ink-mute hover:text-ink"}`}
+            >
+              <Plane size={12} strokeWidth={1.6} /> {a.short}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] leading-snug text-ink-mute">
+          {lim.name}: rollouts of the 6DoF simulator with this airframe's data. The 3D airframe is a generic airliner model shown at true scale.
+        </p>
+      </Section>
+
       <Section title="Guidance agent" aside={<span className="readout text-[10px] text-ink-mute">20 Hz POLICY</span>}>
-        <div className="mb-3 grid grid-cols-3 border border-line" role="radiogroup" aria-label="Controller">
-          {CONTROLLERS.map((c) => (
+        <div className="mb-3 grid border border-line" style={{ gridTemplateColumns: `repeat(${Math.max(controllers.length, 1)}, minmax(0, 1fr))` }} role="radiogroup" aria-label="Controller">
+          {controllers.map((c) => (
             <button
               key={c.id}
               type="button"
@@ -125,7 +151,7 @@ function ControlPanel() {
           ))}
         </div>
         <div className="grid grid-cols-2 gap-1.5">
-          <CommandButton icon={Power} label="ENGAGE PPO AUTOPILOT" tone="primary" active={st.autopilot === "ENGAGED" && st.controller === "ppo"} onClick={engage} hint="Replay the PPO policy rollout for the selected conditions" />
+          <CommandButton icon={Power} label={learned ? "ENGAGE PPO AUTOPILOT" : "ENGAGE AUTOLAND"} tone="primary" active={st.autopilot === "ENGAGED" && st.controller === (learned ? "ppo" : "pid")} onClick={engage} hint={learned ? "Replay the PPO policy rollout for the selected conditions" : "Replay the classical autoland rollout for the selected conditions (no trained policy for this aircraft yet)"} />
           <CommandButton icon={Hand} label="MANUAL OVERRIDE" tone="caution" active={st.autopilot === "MANUAL"} onClick={() => ui.set({ autopilot: "MANUAL", playing: false })} hint="Disengage: the timeline is under operator control (← → keys, scrubber)" />
           <CommandButton icon={RotateCcw} label="RESET TRAJECTORY" onClick={() => { seek(0); ui.set({ playing: st.autopilot === "ENGAGED" }); }} hint="Return to the start of the approach" />
           <CommandButton icon={Download} label="EXPORT TELEMETRY JSON" onClick={exportTelemetry} hint="Download the full 20 Hz telemetry of this rollout" />
@@ -133,7 +159,7 @@ function ControlPanel() {
       </Section>
 
       <Section title="Environment" aside={<span className="readout text-[10px] text-ink-mute">{st.manifest?.scenarios.length ?? 0} ROLLOUTS</span>}>
-        <Slider id="xw" label="Crosswind velocity" unit="kt" min={0} max={30} step={1} value={st.crosswindKt} onChange={(v) => ui.set({ crosswindKt: v })} snapped={snap?.snapped.crosswindKt} />
+        <Slider id="xw" label="Crosswind velocity" unit="kt" min={0} max={xwMax} step={1} value={st.crosswindKt} onChange={(v) => ui.set({ crosswindKt: v })} snapped={snap?.snapped.crosswindKt} />
         <Slider id="gust" label="Gust turbulence intensity" unit="%" min={0} max={100} step={1} value={st.gustPct} onChange={(v) => ui.set({ gustPct: v })} snapped={snap?.snapped.gustPct} />
         <Slider id="gp" label="Glidepath angle" unit="°" min={2.5} max={3.5} step={0.1} decimals={1} value={st.glidepathDeg} onChange={(v) => ui.set({ glidepathDeg: v })} snapped={snap?.snapped.glidepathDeg} />
         <p className="mt-1 text-[11px] leading-snug text-ink-mute">
@@ -150,7 +176,7 @@ function ControlPanel() {
         </div>
         <dl className="readout grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
           <dt className="text-ink-mute">TD SINK</dt>
-          <dd className={`text-right ${m?.touchdown_sink_rate_mps < -1.5 ? "text-warning" : "text-ink"}`}>{fmt(m?.touchdown_sink_rate_mps, 2)} m/s</dd>
+          <dd className={`text-right ${m?.touchdown_sink_rate_mps < lim.crashSink ? "text-warning" : "text-ink"}`}>{fmt(m?.touchdown_sink_rate_mps, 2)} m/s</dd>
           <dt className="text-ink-mute">TD DIST THR</dt>
           <dd className="text-right text-ink">{fmt(m?.touchdown_x_m, 0)} m</dd>
           <dt className="text-ink-mute">TD LATERAL</dt>
@@ -219,7 +245,7 @@ function ControlPanel() {
 /* ---------------------------------------------------------------------------------------------- */
 const RTA_TEXT = {
   bank: "BANK LIMIT", pitch: "PITCH LIMIT", alpha: "AOA LIMIT", airspeed: "LOW SPEED", sink_rate: "SINK RATE",
-  glideslope: "G/S DEVIATION", localizer: "LOC DEVIATION", flare_gate: "FLARE GATE",
+  glideslope: "G/S DEVIATION", localizer: "LOC DEVIATION", flare_gate: "FLARE GATE", locked_out: "PRIMARY LOCKED OUT",
 };
 
 function AuthorityAnnunciator({ s }) {
@@ -246,13 +272,14 @@ function PrimaryFlightDisplay() {
   const clk = useClock(60);
   const s = clk.sample;
   const gp = useUI((st) => st.episode?.glidepathDeg ?? 3);
+  const lim = aircraftLimits(useUI((st) => st.manifest));
   if (!s) return null;
   const [roll, pitch, hdg] = s.euler;
   const gamma = (Math.atan2(s.vz, Math.max(s.gs, 1)) * 180) / Math.PI;
   let drift = s.track - hdg;
   if (drift > 180) drift -= 360;
   if (drift < -180) drift += 360;
-  const gsErr = s.h - Math.max(300 - s.x, 0) * Math.tan((gp * Math.PI) / 180);
+  const gsErr = s.h - Math.max(lim.aimPointM - s.x, 0) * Math.tan((gp * Math.PI) / 180);
   const xw = -s.wind[0] * MPS_TO_KT;
   const hw = s.wind[2] * MPS_TO_KT;
   return (
@@ -266,17 +293,17 @@ function PrimaryFlightDisplay() {
       </div>
       <div className="flex items-start gap-1.5">
         <VerticalTape label="IAS" unit="kt" value={s.ias * MPS_TO_KT} pxPerUnit={3.2} step={5} labelEvery={10} side="left"
-          bugs={[{ value: 64.1, color: "#7cffb2" }]} tone={s.ias < 20 ? "#ff4d4d" : "#e8eef3"} />
+          bugs={[{ value: lim.vrefKt, color: "#7cffb2" }]} tone={s.ias < lim.minAirspeedMps * 1.1 ? "#ff4d4d" : "#e8eef3"} />
         <div className="flex flex-col items-center">
           <AttitudeIndicator pitch={pitch} roll={roll} size={210} fpv={{ x: drift, y: gamma - pitch }} />
           <HeadingTape heading={hdg} track={s.track} width={210} />
         </div>
         <VerticalTape label="ALT" unit="ft" value={s.h * M_TO_FT} pxPerUnit={1.25} step={10} labelEvery={50} side="right"
           bugs={[{ value: 0, color: "#ffb547" }]} tone={s.h < 15 ? "#ffb547" : "#e8eef3"} />
-        <VerticalSpeed vz={s.vz} />
+        <VerticalSpeed vz={s.vz} crash={lim.crashSink} />
       </div>
       <div className="mt-1 flex items-center justify-between border-t border-line pt-1.5">
-        <AoAGauge alpha={s.alpha} />
+        <AoAGauge alpha={s.alpha} warn={lim.alphaWarnDeg} stall={lim.alphaStallDeg} />
         <SlipIndicator beta={s.beta} />
         <dl className="readout grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px]">
           <dt className="text-ink-mute">GS</dt>
@@ -305,8 +332,7 @@ function Readout({ label, value, unit, tone = "text-ink" }) {
   );
 }
 
-function GearBars({ loads }) {
-  const max = 14000;
+function GearBars({ loads, max = 14000 }) {
   return (
     <div className="grid grid-cols-3 gap-2">
       {["NOSE", "MAIN L", "MAIN R"].map((name, i) => (
@@ -327,6 +353,7 @@ function GearBars({ loads }) {
 function AnalyticsPanel() {
   const clk = useClock(12);
   const s = clk.sample;
+  const lim = aircraftLimits(useUI((st) => st.manifest));
   return (
     <aside className="glass pointer-events-auto flex h-full flex-col overflow-y-auto px-3 py-3 [scrollbar-width:thin]" aria-label="Telemetry analytics">
       <div className="mb-2 flex items-center justify-between">
@@ -348,11 +375,11 @@ function AnalyticsPanel() {
             <Readout label="δa" value={signed(s.ail, 1)} unit="°" />
             <Readout label="δr" value={signed(s.rud, 1)} unit="°" />
             <Readout label="X THR" value={fmt(s.x, 0)} unit="m" />
-            <Readout label="Vz" value={signed(s.vz, 2)} unit="m/s" tone={s.vz < -1.5 ? "text-warning" : "text-ink"} />
+            <Readout label="Vz" value={signed(s.vz, 2)} unit="m/s" tone={s.vz < lim.crashSink ? "text-warning" : "text-ink"} />
             <Readout label="Σ REWARD" value={fmt(s.cumReward, 1)} unit="" />
           </div>
           <h2 className="label mb-1.5 mt-3 text-ink-dim">Gear normal load [kN]</h2>
-          <GearBars loads={s.gear} />
+          <GearBars loads={s.gear} max={lim.maxGearLoadN} />
           <h2 className="label mb-1 mt-3 text-ink-dim">Policy action vector</h2>
           <div className="grid grid-cols-4 gap-1.5">
             {["ELEV", "AIL", "RUD", "THR"].map((n, i) => (
@@ -443,6 +470,7 @@ function Timeline() {
 function TouchdownAnnunciator() {
   const clk = useClock(10);
   const ep = useUI((s) => s.episode);
+  const lim = aircraftLimits(useUI((s) => s.manifest));
   const [shown, setShown] = useState(null);
   const last = useRef(0);
   const t = clk.t;
@@ -458,7 +486,7 @@ function TouchdownAnnunciator() {
     const id = setTimeout(() => setShown(null), 4500);
     return () => clearTimeout(id);
   }, [shown]);
-  const hard = shown && shown.sink_rate_mps < -1.5;
+  const hard = shown && shown.sink_rate_mps < lim.crashSink;
   return (
     <AnimatePresence>
       {shown && (
@@ -484,6 +512,7 @@ function TouchdownAnnunciator() {
 
 function CockpitHUDLayer() {
   const gp = useUI((s) => s.episode?.glidepathDeg ?? 3);
+  const lim = aircraftLimits(useUI((s) => s.manifest));
   const clk = useClock(60);
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
@@ -491,7 +520,7 @@ function CockpitHUDLayer() {
     window.addEventListener("resize", on);
     return () => window.removeEventListener("resize", on);
   }, []);
-  return <CockpitHUD s={clk.sample} width={size.w} height={size.h} glidepathDeg={gp} />;
+  return <CockpitHUD s={clk.sample} width={size.w} height={size.h} glidepathDeg={gp} crashSink={lim.crashSink} />;
 }
 
 function HUDLayer() {
@@ -510,7 +539,7 @@ function LoadingOverlay() {
         <motion.div initial={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.6 }}
           className="absolute inset-0 z-40 grid place-items-center bg-obsidian-950">
           <div className="w-[320px]">
-            <div className="readout text-[12px] tracking-[0.24em] text-ink">ALMA-AUTOLAND</div>
+            <div className="readout text-[12px] tracking-[0.24em] text-ink">CROSSWIND AUTOLAND</div>
             <div className="label mt-1">{error ? "Telemetry link fault" : "Acquiring telemetry link · loading scene.glb"}</div>
             <div className="mt-4 h-px bg-line">
               <div className="h-px bg-data transition-[width]" style={{ width: `${error ? 100 : Math.max(progress, loading ? 8 : 100)}%` }} />

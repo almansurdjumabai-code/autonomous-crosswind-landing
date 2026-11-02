@@ -6,8 +6,10 @@ intensity x glidepath), records every 20 Hz control step with
 ``public/models/scene.glb`` and writes:
 
 * ``<out>/flight_data.json``         manifest: scenario grid, per-scenario outcome metrics,
-                                      runway geometry, units, provenance + the default episode inline
+                                      aircraft and runway data, units, provenance + the default episode inline
 * ``<out>/episodes/<scenario>.json``  one column-oriented episode per scenario (fetched lazily)
+
+One data set per aircraft preset: ``<out>`` defaults to ``src/web/public/data/<aircraft>``.
 
 Coordinate frame (Three.js, matches the GLB): +X east, +Y up, +Z south; the runway
 runs from the threshold at the origin towards -Z. Quaternions are [x, y, z, w] and
@@ -15,8 +17,10 @@ rotate the exported aircraft model (nose +X, up +Y, left wing -Z) into the world
 
 Usage::
 
-    python -m src.viz.export_flight_data --model runs/ppo_crosswind/best/best_model.zip \
-        --out src/web/public/data
+    # ATR 72-600, classical autoland only (no trained policy yet)
+    python -m src.viz.export_flight_data --aircraft atr72 --controllers pid
+    # with a policy trained on the same preset
+    python -m src.viz.export_flight_data --aircraft atr72 --model runs/ppo_atr72/best/best_model.zip
 """
 
 from __future__ import annotations
@@ -38,12 +42,14 @@ import numpy as np
 
 from src.agents.baseline_autopilot import ClassicalAutopilot
 from src.agents.safety_supervisor import SafetySupervisor
-from src.env.aircraft_env import CrosswindLandingEnv, EnvConfig, KT_TO_MPS
+from src.env.aircraft_env import AIRCRAFT_PRESETS, DEFAULT_AIRCRAFT, CrosswindLandingEnv, EnvConfig, KT_TO_MPS, make_env_config
 from src.utils.telemetry import TelemetryRecorder
 
 SCHEMA = "alma-autoland-flight-data"
-SCHEMA_VERSION = "1.0.0"
-CROSSWINDS_KT = (0, 5, 10, 15, 20, 25, 30)
+SCHEMA_VERSION = "1.1.0"
+# The ATR 72 demonstrated crosswind limit is 35 kt; the light aircraft grid stops at 30 kt.
+CROSSWINDS_KT_BY_AIRCRAFT = {"atr72": (0, 5, 10, 15, 20, 25, 30, 35), "cessna172": (0, 5, 10, 15, 20, 25, 30)}
+CROSSWINDS_KT = CROSSWINDS_KT_BY_AIRCRAFT[DEFAULT_AIRCRAFT]
 GUST_LEVELS_PCT = (0, 50, 100)
 GLIDEPATHS_DEG = (2.5, 3.0, 3.5)
 
@@ -57,11 +63,12 @@ CONTROLLER_LABELS = {
     "ppo_raw": "PPO policy, unprotected",
     "pid": "Classical crosswind autoland (PID)",
 }
-RTA_REASONS = ("bank", "pitch", "alpha", "airspeed", "sink_rate", "glideslope", "localizer", "flare_gate")
+RTA_REASONS = ("bank", "pitch", "alpha", "airspeed", "sink_rate", "glideslope", "localizer", "flare_gate", "locked_out")
 
 
-def env_config(gust_pct: int, gp_deg: float, action_mode: str = "absolute", residual_scale: float = 0.3) -> EnvConfig:
-    cfg = EnvConfig(action_mode=action_mode, residual_scale=residual_scale)
+def env_config(gust_pct: int, gp_deg: float, action_mode: str = "absolute", residual_scale: float = 0.3,
+               aircraft: str = DEFAULT_AIRCRAFT) -> EnvConfig:
+    cfg = make_env_config(aircraft, action_mode=action_mode, residual_scale=residual_scale)
     g = gust_pct / 100.0
     cfg.wind = replace(
         cfg.wind,
@@ -121,13 +128,17 @@ class PPOPolicy:
     def __init__(self, model_path: str) -> None:
         from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-        from src.agents.train_ppo import find_vecnormalize, load_ppo, run_action_mode
+        from src.agents.train_ppo import find_vecnormalize, load_ppo, run_settings
 
+        settings = run_settings(model_path)
+        self.aircraft = settings["aircraft"]
         self.model = load_ppo(model_path, device="cpu")
-        self.vecnorm = VecNormalize.load(str(find_vecnormalize(model_path)), DummyVecEnv([CrosswindLandingEnv]))
+        self.vecnorm = VecNormalize.load(
+            str(find_vecnormalize(model_path)), DummyVecEnv([lambda: CrosswindLandingEnv(make_env_config(self.aircraft))])
+        )
         self.vecnorm.training = False
         self.model_path = model_path
-        self.action_mode, self.residual_scale = run_action_mode(model_path)
+        self.action_mode, self.residual_scale = settings["action_mode"], settings["residual_scale"]
 
     def __call__(self, obs: np.ndarray) -> np.ndarray:
         a, _ = self.model.predict(self.vecnorm.normalize_obs(obs[None, :].astype(np.float32)), deterministic=True)
@@ -193,8 +204,8 @@ def to_web_episode(doc: dict[str, Any], sid: str, controller: str, xw_kt: float,
 
 
 def run_episode(controller_name: str, factory, xw_kt: float, gust_pct: int, gp_deg: float, seed: int,
-                action_mode: str = "absolute", residual_scale: float = 0.3) -> dict:
-    env = TelemetryRecorder(CrosswindLandingEnv(env_config(gust_pct, gp_deg, action_mode, residual_scale)))
+                action_mode: str = "absolute", residual_scale: float = 0.3, aircraft: str = DEFAULT_AIRCRAFT) -> dict:
+    env = TelemetryRecorder(CrosswindLandingEnv(env_config(gust_pct, gp_deg, action_mode, residual_scale, aircraft)))
     obs, _ = env.reset(seed=seed, options={"wind_speed_mps": xw_kt * KT_TO_MPS, "wind_from_deg": 90.0, "start_y_m": 0.0})
     ctrl: Controller = factory(env.unwrapped)
     authority = [ctrl.authority]
@@ -215,25 +226,57 @@ def run_episode(controller_name: str, factory, xw_kt: float, gust_pct: int, gp_d
     return ep
 
 
+def aircraft_manifest(cfg: EnvConfig) -> dict[str, Any]:
+    """Aircraft block of the manifest: what the console needs to label and scale its instruments."""
+    ac = cfg.aircraft
+    from src.env.aircraft_env import aircraft_key
+
+    return {
+        "key": aircraft_key(ac),
+        "name": ac.name,
+        "mass_kg": ac.mass_kg,
+        "span_m": ac.span_m,
+        "approach_speed_mps": cfg.approach_speed_mps,
+        "vref_kt": round(cfg.approach_speed_mps / KT_TO_MPS, 1),
+        "min_airspeed_mps": cfg.min_airspeed_mps,
+        "alpha_stall_deg": round(math.degrees(ac.alpha_stall_rad), 1),
+        "alpha_warning_deg": round(math.degrees(cfg.reward.alpha_warning_rad), 1),
+        "wheel_height_m": ac.wheel_height_m,
+        "crash_sink_rate_mps": cfg.reward.crash_sink_rate_mps,
+        "max_gear_load_n": 0.9 * ac.mass_kg * 9.80665,
+    }
+
+
 def main(argv: Optional[list[str]] = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--model", default="runs/ppo_crosswind/best/best_model.zip")
-    p.add_argument("--out", default="src/web/public/data")
+    p.add_argument("--aircraft", choices=tuple(AIRCRAFT_PRESETS), default=DEFAULT_AIRCRAFT)
+    p.add_argument("--model", default=None, help="PPO checkpoint trained on the same aircraft preset")
+    p.add_argument("--out", default=None, help="output folder (default src/web/public/data/<aircraft>)")
     p.add_argument("--seed", type=int, default=2026)
-    p.add_argument("--crosswinds", type=float, nargs="+", default=list(CROSSWINDS_KT))
+    p.add_argument("--crosswinds", type=float, nargs="+", default=None)
     p.add_argument("--gusts", type=int, nargs="+", default=list(GUST_LEVELS_PCT))
     p.add_argument("--glidepaths", type=float, nargs="+", default=list(GLIDEPATHS_DEG))
-    p.add_argument("--controllers", nargs="+", default=["ppo", "ppo_raw", "pid"], choices=("ppo", "ppo_raw", "pid"))
+    p.add_argument("--controllers", nargs="+", default=None, choices=("ppo", "ppo_raw", "pid"),
+                   help="default: ppo ppo_raw pid with --model, pid alone without")
     p.add_argument("--default", default=None, help="scenario id embedded in flight_data.json")
     a = p.parse_args(argv)
+    if a.controllers is None:
+        a.controllers = ["ppo", "ppo_raw", "pid"] if a.model else ["pid"]
+    if a.crosswinds is None:
+        a.crosswinds = list(CROSSWINDS_KT_BY_AIRCRAFT.get(a.aircraft, CROSSWINDS_KT))
 
-    out = Path(a.out)
+    out = Path(a.out) if a.out else Path("src/web/public/data") / a.aircraft
     (out / "episodes").mkdir(parents=True, exist_ok=True)
     factories: dict[str, Any] = {}
-    provenance: dict[str, Any] = {"generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "seed": a.seed}
+    provenance: dict[str, Any] = {"generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "seed": a.seed,
+                                  "aircraft": a.aircraft}
     action_mode, residual_scale = "absolute", 0.3
     if {"ppo", "ppo_raw"} & set(a.controllers):
+        if not a.model:
+            p.error("--model is required for the ppo controllers")
         ppo = PPOPolicy(a.model)
+        if ppo.aircraft != a.aircraft:
+            p.error(f"checkpoint {a.model} was trained on preset {ppo.aircraft!r}, not {a.aircraft!r}")
         action_mode, residual_scale = ppo.action_mode, ppo.residual_scale
         if "ppo" in a.controllers:
             factories["ppo"] = lambda env: SupervisedController(env, ppo)
@@ -254,7 +297,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             for g in a.gusts:
                 for gp in a.glidepaths:
                     mode = action_mode if ctrl != "pid" else "absolute"
-                    ep = run_episode(ctrl, factory, xw, g, gp, a.seed, mode, residual_scale)
+                    ep = run_episode(ctrl, factory, xw, g, gp, a.seed, mode, residual_scale, a.aircraft)
                     path = out / "episodes" / f"{ep['id']}.json"
                     path.write_text(json.dumps(ep, separators=(",", ":")), encoding="utf-8")
                     m = ep["metrics"]
@@ -274,16 +317,20 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     default_id = a.default or scenario_id(a.controllers[0], 10 if 10 in a.crosswinds else a.crosswinds[0],
                                           50 if 50 in a.gusts else a.gusts[0], 3.0 if 3.0 in a.glidepaths else a.glidepaths[0])
-    cfg = EnvConfig()
+    cfg = make_env_config(a.aircraft)
+    ac = cfg.aircraft
     manifest = {
         "schema": SCHEMA,
         "schema_version": SCHEMA_VERSION,
-        "project": "ALMA-AUTOLAND",
+        "project": "AUTONOMOUS-CROSSWIND-LANDING",
         "frame": "three.js / glTF: +X east, +Y up, +Z south; runway threshold at origin, runway along -Z",
         "units": {"length": "m", "speed": "m/s", "angle": "deg", "force": "N", "time": "s"},
+        "aircraft": aircraft_manifest(cfg),
         "runway": {"length_m": cfg.runway.length_m, "width_m": cfg.runway.width_m, "aim_point_m": cfg.runway.aim_point_m},
-        "control_limits_deg": {"elevator": 25.0, "aileron": 20.0, "rudder": 25.0},
-        "crash_sink_rate_mps": -1.5,
+        "control_limits_deg": {"elevator": round(math.degrees(ac.elevator_limit_rad), 1),
+                               "aileron": round(math.degrees(ac.aileron_limit_rad), 1),
+                               "rudder": round(math.degrees(ac.rudder_limit_rad), 1)},
+        "crash_sink_rate_mps": cfg.reward.crash_sink_rate_mps,
         "controller_labels": {k: CONTROLLER_LABELS[k] for k in factories},
         "grid": {"controllers": list(factories), "crosswind_kt": list(a.crosswinds), "gust_pct": list(a.gusts),
                  "glidepath_deg": list(a.glidepaths)},

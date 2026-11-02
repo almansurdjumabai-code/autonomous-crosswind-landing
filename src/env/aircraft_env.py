@@ -19,9 +19,14 @@ Physical model
 --------------
 * Non-linear rigid-body equations of motion with full inertia tensor,
   integrated by classical 4th-order Runge-Kutta at ``physics_dt``.
-* Aerodynamics: Cessna-172-class stability-derivative model with a smooth
-  sigmoid blend to a flat-plate post-stall model, McCormick ground effect on
-  induced drag, and a fixed-pitch-propeller thrust model.
+* Aerodynamics: stability-derivative model (default data: ATR 72-600 regional
+  turboprop in landing configuration, flaps 30 and gear down; a Cessna-172-class
+  preset is kept for the original experiments) with a smooth sigmoid blend to a
+  flat-plate post-stall model, McCormick ground effect on induced drag, and a
+  linear propeller thrust model.
+* Aircraft presets: :data:`AIRCRAFT_PRESETS` bundles the airframe data with the
+  operating point (approach speed, runway, episode limits, reward tolerances);
+  :func:`make_env_config` builds a configuration from a preset key.
 * Atmosphere: ISA density, power-law mean wind with directional shear (veer)
   with altitude, MIL-F-8785C low-altitude Dryden turbulence (exactly
   discretised shaping filters) and Poisson-triggered "1-cosine" discrete gusts.
@@ -202,75 +207,97 @@ class GearLeg:
 
 @dataclass(frozen=True)
 class AircraftParameters:
-    """Cessna-172-class general-aviation aircraft (Roskam / Stevens & Lewis data)."""
+    """Rigid-body, aerodynamic, propulsion, actuator and ground-contact data of one airframe.
 
-    mass_kg: float = 1043.0
+    The defaults describe an **ATR 72-600** regional turboprop in landing configuration
+    (flaps 30, gear down, landing mass 21 t). The stability derivatives are a
+    landing-configuration estimate assembled from the published geometry (S = 61 m^2,
+    b = 27.05 m, AR = 12), the certified speeds (V_REF ~ 107 kt at 21 t, hence
+    C_Lmax ~ 2.7 in this configuration) and class data for high-wing twin turboprops;
+    they are not ATR flight-test data. :data:`CESSNA_172` keeps the original
+    general-aviation data set (Roskam / Stevens & Lewis).
+    """
+
+    name: str = "ATR 72-600"
+    mass_kg: float = 21000.0
+    # Estimated from radii of gyration of twin-turboprop regional aircraft (kg m^2).
     inertia_kgm2: tuple[tuple[float, float, float], ...] = (
-        (1285.3, 0.0, 0.0),
-        (0.0, 1824.9, 0.0),
-        (0.0, 0.0, 2666.9),
+        (230000.0, 0.0, 0.0),
+        (0.0, 550000.0, 0.0),
+        (0.0, 0.0, 720000.0),
     )
-    wing_area_m2: float = 16.2
-    span_m: float = 10.92
-    chord_m: float = 1.49
-    oswald_efficiency: float = 0.80
-    wing_height_above_cg_m: float = 1.0
+    wing_area_m2: float = 61.0
+    span_m: float = 27.05
+    chord_m: float = 2.30
+    oswald_efficiency: float = 0.78
+    # High wing: the wing sits about 1.7 m above the centre of gravity (ground effect).
+    wing_height_above_cg_m: float = 1.7
 
-    # Longitudinal aerodynamics.
-    CL0: float = 0.31
-    CL_alpha: float = 5.143
-    CL_q: float = 3.9
-    CL_de: float = 0.43
-    CD0: float = 0.031
-    CD_beta: float = 0.17
-    CD_de: float = 0.06
-    alpha_stall_rad: float = 0.28
+    # Longitudinal aerodynamics (flaps 30: large C_L0 and nose-down C_m0).
+    CL0: float = 1.25
+    CL_alpha: float = 5.8
+    CL_q: float = 7.5
+    CL_de: float = 0.40
+    CD0: float = 0.085
+    CD_beta: float = 0.20
+    CD_de: float = 0.04
+    alpha_stall_rad: float = 0.25
     stall_blend_rate: float = 50.0
-    Cm0: float = -0.015
-    Cm_alpha: float = -0.89
-    Cm_q: float = -12.4
-    Cm_de: float = -1.28
+    Cm0: float = -0.12
+    Cm_alpha: float = -1.35
+    Cm_q: float = -32.0
+    Cm_de: float = -1.75
 
-    # Lateral-directional aerodynamics.
-    CY_beta: float = -0.31
-    CY_p: float = -0.037
-    CY_r: float = 0.21
-    CY_dr: float = 0.187
-    Cl_beta: float = -0.089
-    Cl_p: float = -0.47
-    Cl_r: float = 0.096
-    Cl_da: float = 0.178
-    Cl_dr: float = 0.0147
-    Cn_beta: float = 0.065
-    Cn_p: float = -0.03
-    Cn_r: float = -0.099
-    Cn_da: float = -0.053
-    Cn_dr: float = -0.0657
+    # Lateral-directional aerodynamics (large fin and rudder, high-wing dihedral effect).
+    CY_beta: float = -0.80
+    CY_p: float = -0.06
+    CY_r: float = 0.40
+    CY_dr: float = 0.22
+    Cl_beta: float = -0.11
+    Cl_p: float = -0.52
+    Cl_r: float = 0.18
+    Cl_da: float = 0.13
+    Cl_dr: float = 0.012
+    Cn_beta: float = 0.15
+    Cn_p: float = -0.045
+    Cn_r: float = -0.20
+    Cn_da: float = -0.012
+    Cn_dr: float = -0.10
 
     # Propulsion: T = dt * T_static * (rho/rho0) * max(0, 1 - Va / V_zero_thrust).
-    thrust_static_n: float = 2200.0
-    prop_zero_thrust_speed_mps: float = 110.0
+    # Two PW127M turboprops: about 56 kN static, 40 kN at the approach speed.
+    thrust_static_n: float = 56000.0
+    prop_zero_thrust_speed_mps: float = 190.0
 
-    # Actuators: limits, first-order time constants, rate limits.
+    # Actuators: limits, first-order time constants, rate limits (autopilot servo rates).
     elevator_limit_rad: float = math.radians(25.0)
     aileron_limit_rad: float = math.radians(20.0)
     rudder_limit_rad: float = math.radians(25.0)
-    surface_time_constant_s: float = 0.06
-    throttle_time_constant_s: float = 0.40
-    surface_rate_limit_rps: float = math.radians(80.0)
-    throttle_rate_limit_ps: float = 1.0
+    surface_time_constant_s: float = 0.10
+    throttle_time_constant_s: float = 1.0
+    surface_rate_limit_rps: float = math.radians(40.0)
+    throttle_rate_limit_ps: float = 0.5
 
-    # Ground handling.
+    # Ground handling. Main gear in the fuselage sponsons (track 4.1 m, wheelbase 10.75 m);
+    # the struts compress about 0.22 m under the landing weight.
     gear: tuple[GearLeg, ...] = (
-        GearLeg("nose", (1.30, 0.0, 0.90), 30000.0, 3000.0, is_main=False, steerable=True),
-        GearLeg("main_left", (-0.30, -1.20, 1.00), 40000.0, 4000.0, is_main=True),
-        GearLeg("main_right", (-0.30, 1.20, 1.00), 40000.0, 4000.0, is_main=True),
+        GearLeg("nose", (9.50, 0.0, 2.45), 150000.0, 15000.0, is_main=False, steerable=True),
+        GearLeg("main_left", (-1.25, -2.05, 2.55), 420000.0, 55000.0, is_main=True),
+        GearLeg("main_right", (-1.25, 2.05, 2.55), 420000.0, 55000.0, is_main=True),
     )
+    # Contact points that end the episode as a strike, checked in this order. The propeller
+    # discs (3.93 m diameter under the high wing, about 1.25 m above the ground at rest) touch
+    # first in a bank, at about 15 deg with the struts compressed; the wing tips (4.3 m above
+    # the ground) at about 17 deg; the aft fuselage at about 7 deg of pitch (tail strike).
     structural_points: tuple[tuple[str, tuple[float, float, float]], ...] = (
-        ("wingtip_left", (-0.30, -5.46, -0.60)),
-        ("wingtip_right", (-0.30, 5.46, -0.60)),
-        ("tail", (-4.50, 0.0, 0.0)),
+        ("prop_left", (3.60, -4.10, 1.30)),
+        ("prop_right", (3.60, 4.10, 1.30)),
+        ("wingtip_left", (-1.00, -13.5, -1.75)),
+        ("wingtip_right", (-1.00, 13.5, -1.75)),
+        ("tail", (-13.5, 0.0, 0.65)),
     )
+    # Centre-of-gravity height below which the fuselage itself is on the ground.
+    fuselage_clearance_m: float = 1.40
     rolling_friction: float = 0.03
     cornering_friction: float = 0.70
     friction_velocity_scale_mps: float = 0.30
@@ -281,6 +308,11 @@ class AircraftParameters:
         return np.array(self.inertia_kgm2, dtype=np.float64)
 
     @property
+    def wheel_height_m(self) -> float:
+        """Height of the centre of gravity above the ground with the main wheels just touching."""
+        return max(g.position_body[2] for g in self.gear if g.is_main)
+
+    @property
     def aspect_ratio(self) -> float:
         return self.span_m**2 / self.wing_area_m2
 
@@ -289,6 +321,44 @@ class AircraftParameters:
         return np.array(
             [self.elevator_limit_rad, self.aileron_limit_rad, self.rudder_limit_rad, 1.0], dtype=np.float64
         )
+
+
+ATR_72_600 = AircraftParameters()
+
+CESSNA_172 = AircraftParameters(
+    name="Cessna 172",
+    mass_kg=1043.0,
+    inertia_kgm2=((1285.3, 0.0, 0.0), (0.0, 1824.9, 0.0), (0.0, 0.0, 2666.9)),
+    wing_area_m2=16.2,
+    span_m=10.92,
+    chord_m=1.49,
+    oswald_efficiency=0.80,
+    wing_height_above_cg_m=1.0,
+    CL0=0.31, CL_alpha=5.143, CL_q=3.9, CL_de=0.43,
+    CD0=0.031, CD_beta=0.17, CD_de=0.06,
+    alpha_stall_rad=0.28, stall_blend_rate=50.0,
+    Cm0=-0.015, Cm_alpha=-0.89, Cm_q=-12.4, Cm_de=-1.28,
+    CY_beta=-0.31, CY_p=-0.037, CY_r=0.21, CY_dr=0.187,
+    Cl_beta=-0.089, Cl_p=-0.47, Cl_r=0.096, Cl_da=0.178, Cl_dr=0.0147,
+    Cn_beta=0.065, Cn_p=-0.03, Cn_r=-0.099, Cn_da=-0.053, Cn_dr=-0.0657,
+    thrust_static_n=2200.0,
+    prop_zero_thrust_speed_mps=110.0,
+    surface_time_constant_s=0.06,
+    throttle_time_constant_s=0.40,
+    surface_rate_limit_rps=math.radians(80.0),
+    throttle_rate_limit_ps=1.0,
+    gear=(
+        GearLeg("nose", (1.30, 0.0, 0.90), 30000.0, 3000.0, is_main=False, steerable=True),
+        GearLeg("main_left", (-0.30, -1.20, 1.00), 40000.0, 4000.0, is_main=True),
+        GearLeg("main_right", (-0.30, 1.20, 1.00), 40000.0, 4000.0, is_main=True),
+    ),
+    structural_points=(
+        ("wingtip_left", (-0.30, -5.46, -0.60)),
+        ("wingtip_right", (-0.30, 5.46, -0.60)),
+        ("tail", (-4.50, 0.0, 0.0)),
+    ),
+    fuselage_clearance_m=0.25,
+)
 
 
 # =============================================================================
@@ -505,32 +575,58 @@ class DiscreteGustGenerator:
 # =============================================================================
 @dataclass
 class RunwayConfig:
-    length_m: float = 1600.0
-    width_m: float = 30.0
+    """Default: a 2500 m x 45 m regional runway (the test runway of the ATR FFS visual)."""
+
+    length_m: float = 2500.0
+    width_m: float = 45.0
     aim_point_m: float = 300.0
     glideslope_rad: float = math.radians(3.0)
     field_elevation_m: float = 0.0
 
 
+# Reward tolerances of the ATR 72 operating point (see :class:`RewardConfig` for the fields).
+# The hard-landing limit of -2.5 m/s (about 500 ft/min) sits between the airline hard-landing
+# report level and the 10 ft/s certification limit descent velocity.
+ATR72_REWARD: dict[str, Any] = dict(
+    crash_sink_rate_mps=-2.5,
+    ideal_sink_rate_mps=-0.6,
+    sink_rate_sigma_mps=0.8,
+    touchdown_x_sigma_m=250.0,
+    roll_limit_rad=math.radians(20.0),
+    pitch_min_rad=math.radians(-8.0),
+    pitch_max_rad=math.radians(8.0),
+    alpha_warning_rad=math.radians(10.0),
+    low_alt_threshold_m=25.0,
+    airspeed_tol_mps=5.0,
+    flare_height_m=20.0,
+    flare_sink_target_mps=-1.2,
+)
+
+
 @dataclass
 class EnvConfig:
+    """Environment configuration. The defaults are the ATR 72-600 operating point
+    (``make_env_config(aircraft="atr72")``); ``make_env_config(aircraft="cessna172")``
+    restores the light-aircraft set-up of the original experiments."""
+
     aircraft: AircraftParameters = field(default_factory=AircraftParameters)
     runway: RunwayConfig = field(default_factory=RunwayConfig)
     wind: WindConfig = field(default_factory=WindConfig)
-    reward: RewardConfig = field(default_factory=RewardConfig)
+    reward: RewardConfig = field(default_factory=lambda: RewardConfig(**ATR72_REWARD))
 
     physics_dt: float = 0.01
     control_dt: float = 0.05
     max_episode_s: float = 150.0
     rollout_time_s: float = 3.0
 
-    approach_speed_mps: float = 33.0
-    start_distance_range_m: tuple[float, float] = (1500.0, 2200.0)
-    start_lateral_range_m: tuple[float, float] = (-40.0, 40.0)
-    start_height_sigma_m: float = 6.0
+    # V_REF of the ATR 72 at 21 t, flaps 30: about 107 kt.
+    approach_speed_mps: float = 55.0
+    start_distance_range_m: tuple[float, float] = (3000.0, 4500.0)
+    start_lateral_range_m: tuple[float, float] = (-60.0, 60.0)
+    start_height_sigma_m: float = 8.0
     start_heading_range_rad: tuple[float, float] = (math.radians(-8.0), math.radians(8.0))
     start_roll_range_rad: tuple[float, float] = (math.radians(-5.0), math.radians(5.0))
-    start_airspeed_range_mps: tuple[float, float] = (-2.0, 2.0)
+    start_airspeed_range_mps: tuple[float, float] = (-3.0, 3.0)
 
     # Actions are offsets from the trimmed glide controls when True.
     trim_referenced_actions: bool = True
@@ -544,11 +640,73 @@ class EnvConfig:
     # Flight-envelope limits that terminate the episode as a crash.
     max_bank_rad: float = math.radians(70.0)
     max_pitch_rad: float = math.radians(40.0)
-    min_airspeed_mps: float = 18.0
-    max_airspeed_mps: float = 70.0
-    max_lateral_m: float = 400.0
-    max_height_m: float = 500.0
-    min_fuselage_height_m: float = 0.25
+    min_airspeed_mps: float = 38.0
+    max_airspeed_mps: float = 100.0
+    max_lateral_m: float = 500.0
+    max_height_m: float = 600.0
+
+
+@dataclass(frozen=True)
+class AircraftPreset:
+    """An airframe together with its operating point: approach speed, episode geometry,
+    envelope limits, runway and reward tolerances."""
+
+    key: str
+    aircraft: AircraftParameters
+    runway: RunwayConfig
+    env: dict[str, Any] = field(default_factory=dict)
+    reward: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def name(self) -> str:
+        return self.aircraft.name
+
+
+AIRCRAFT_PRESETS: dict[str, AircraftPreset] = {
+    "atr72": AircraftPreset(
+        key="atr72",
+        aircraft=ATR_72_600,
+        runway=RunwayConfig(length_m=2500.0, width_m=45.0, aim_point_m=300.0),
+        env=dict(
+            approach_speed_mps=55.0,
+            start_distance_range_m=(3000.0, 4500.0),
+            start_lateral_range_m=(-60.0, 60.0),
+            start_height_sigma_m=8.0,
+            start_airspeed_range_mps=(-3.0, 3.0),
+            min_airspeed_mps=38.0,
+            max_airspeed_mps=100.0,
+            max_lateral_m=500.0,
+            max_height_m=600.0,
+        ),
+        reward=dict(ATR72_REWARD),
+    ),
+    "cessna172": AircraftPreset(
+        key="cessna172",
+        aircraft=CESSNA_172,
+        runway=RunwayConfig(length_m=1600.0, width_m=30.0, aim_point_m=300.0),
+        env=dict(
+            approach_speed_mps=33.0,
+            start_distance_range_m=(1500.0, 2200.0),
+            start_lateral_range_m=(-40.0, 40.0),
+            start_height_sigma_m=6.0,
+            start_airspeed_range_mps=(-2.0, 2.0),
+            min_airspeed_mps=18.0,
+            max_airspeed_mps=70.0,
+            max_lateral_m=400.0,
+            max_height_m=500.0,
+        ),
+        reward={},
+    ),
+}
+DEFAULT_AIRCRAFT = "atr72"
+
+
+def aircraft_key(aircraft: AircraftParameters) -> str:
+    """Preset key of an airframe (by name), ``"custom"`` if it matches no preset."""
+    for key, preset in AIRCRAFT_PRESETS.items():
+        if preset.aircraft.name == aircraft.name:
+            return key
+    return "custom"
 
 
 # =============================================================================
@@ -592,6 +750,8 @@ class CrosswindLandingEnv(gym.Env):
         self.inertia = ac.inertia
         self.inertia_inv = np.linalg.inv(self.inertia)
         self.limits = ac.control_limits
+        # Height of the CG above the runway with the main wheels just touching (struts unloaded).
+        self.wheel_height_m = ac.wheel_height_m
         self._gear_r = [np.array(g.position_body, dtype=np.float64) for g in ac.gear]
         self._struct_r = [(n, np.array(r, dtype=np.float64)) for n, r in ac.structural_points]
 
@@ -886,7 +1046,7 @@ class CrosswindLandingEnv(gym.Env):
         for name, r in self._struct_r:
             if z + float(r_nb[2] @ r) > 0.0:
                 return f"{name}_strike"
-        if -z < self.cfg.min_fuselage_height_m:
+        if -z < self.cfg.aircraft.fuselage_clearance_m:
             return "fuselage_strike"
         return None
 
@@ -1242,16 +1402,28 @@ class CrosswindLandingEnv(gym.Env):
         )
 
 
-def make_env_config(**overrides: Any) -> EnvConfig:
-    """Convenience constructor: ``make_env_config(max_wind_speed_mps=12.0)`` etc.
+def make_env_config(aircraft: str | AircraftPreset = DEFAULT_AIRCRAFT, **overrides: Any) -> EnvConfig:
+    """Build a configuration for an aircraft preset, then apply field overrides.
 
-    Keys matching ``WindConfig`` fields are routed to the wind config, the rest to
-    :class:`EnvConfig`.
+    ``make_env_config("atr72", max_wind_speed_mps=12.0)``. Keys matching ``WindConfig``,
+    ``RunwayConfig`` or ``RewardConfig`` fields are routed to those sub-configurations,
+    the rest to :class:`EnvConfig`. A key that exists in several of them (none today)
+    goes to the first match in that order.
     """
+    preset = AIRCRAFT_PRESETS[aircraft] if isinstance(aircraft, str) else aircraft
     wind_keys = set(WindConfig.__dataclass_fields__)
+    runway_keys = set(RunwayConfig.__dataclass_fields__)
+    reward_keys = set(RewardConfig.__dataclass_fields__)
     wind_over = {k: v for k, v in overrides.items() if k in wind_keys}
-    env_over = {k: v for k, v in overrides.items() if k not in wind_keys}
-    cfg = EnvConfig(**env_over)
+    runway_over = {k: v for k, v in overrides.items() if k in runway_keys and k not in wind_keys}
+    reward_over = {k: v for k, v in overrides.items() if k in reward_keys and k not in wind_keys | runway_keys}
+    env_over = {k: v for k, v in overrides.items() if k not in wind_keys | runway_keys | reward_keys}
+    cfg = EnvConfig(
+        aircraft=preset.aircraft,
+        runway=replace(preset.runway, **runway_over),
+        reward=RewardConfig(**{**preset.reward, **reward_over}),
+        **{**preset.env, **env_over},
+    )
     if wind_over:
         cfg.wind = replace(cfg.wind, **wind_over)
     return cfg

@@ -10,6 +10,9 @@ Experiments (all on the 6DoF simulator, fixed seeds, the same seeds for every co
 Usage::
 
     python -m src.viz.report_experiment --model report/model_snapshot/best/best_model.zip
+
+The aircraft preset is read from the checkpoint's run configuration (``--aircraft`` overrides it;
+the report's snapshot was trained on the Cessna-172-class preset).
 """
 
 from __future__ import annotations
@@ -26,8 +29,9 @@ from pathlib import Path
 
 import numpy as np
 
-from src.env.aircraft_env import CrosswindLandingEnv, EnvConfig
-from src.viz.export_flight_data import PIDController, PPOPolicy, RawPolicyController, SupervisedController, env_config
+from src.env.aircraft_env import AIRCRAFT_PRESETS, CrosswindLandingEnv, EnvConfig, make_env_config
+from src.viz.export_flight_data import PIDController, PPOPolicy, RawPolicyController, SupervisedController
+from src.viz.export_flight_data import env_config as _env_config
 
 CONTROLLERS = ("pid", "ppo_rta", "ppo_raw")
 CROSSWINDS_MPS = (0.0, 5.0, 10.0, 15.0, 20.0)
@@ -40,15 +44,21 @@ GUST_MEAN_WIND_MPS = 5.0
 RECOVERY_BAND_M = 5.0
 LOAD_WINDOW_S = 1.0
 _policy = None
+_aircraft = "cessna172"
 
 
-def _init_worker(model_path: str) -> None:
-    global _policy
+def env_config(gust_pct: int, gp_deg: float) -> EnvConfig:
+    return _env_config(gust_pct, gp_deg, aircraft=_aircraft)
+
+
+def _init_worker(model_path: str, aircraft: str) -> None:
+    global _policy, _aircraft
     if sys.platform == "win32":
         k = ctypes.windll.kernel32
         k.GetCurrentProcess.restype = ctypes.c_void_p
         k.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
         k.SetPriorityClass(k.GetCurrentProcess(), 0x4000)
+    _aircraft = aircraft
     _policy = PPOPolicy(model_path)
 
 
@@ -139,7 +149,7 @@ def _gust_task(args: tuple) -> dict:
 
 def _crab_task(args: tuple) -> dict:
     wind, seed = args
-    cfg = EnvConfig()
+    cfg = make_env_config(_aircraft)
     env = CrosswindLandingEnv(cfg)
     obs, _ = env.reset(seed=seed, options={"wind_speed_mps": wind, "wind_from_deg": 90.0, "turbulence": False, "gusts": False, "start_y_m": 0.0, "start_x_m": -1800.0})
     ctrl = PIDController(env)
@@ -179,13 +189,19 @@ def _latency_task(controller: str) -> dict:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--model", required=True)
+    p.add_argument("--aircraft", choices=tuple(AIRCRAFT_PRESETS), default=None,
+                   help="airframe preset (default: the one the checkpoint was trained on)")
     p.add_argument("--out", default="report/data")
     p.add_argument("--workers", type=int, default=3)
     a = p.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    from src.agents.train_ppo import run_settings
+
+    aircraft = a.aircraft or run_settings(a.model)["aircraft"]
+    print(f"aircraft preset: {aircraft}", flush=True)
     t0 = time.time()
-    with ProcessPoolExecutor(a.workers, initializer=_init_worker, initargs=(a.model,)) as pool:
+    with ProcessPoolExecutor(a.workers, initializer=_init_worker, initargs=(a.model, aircraft)) as pool:
         crab = list(pool.map(_crab_task, [(w, 1000) for w in (2.5, 5.0, 7.5, 10.0, 12.5, 15.0)]))
         (out / "crab.json").write_text(json.dumps(crab, indent=1), encoding="utf-8")
         print("crab done", time.time() - t0, flush=True)

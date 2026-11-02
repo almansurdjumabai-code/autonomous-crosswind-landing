@@ -46,7 +46,7 @@ from matplotlib.ticker import MaxNLocator  # noqa: E402
 
 from src.agents.baseline_autopilot import ClassicalAutopilot  # noqa: E402
 from src.agents.reward_shaping import CRASH_SINK_RATE_MPS  # noqa: E402
-from src.env.aircraft_env import CrosswindLandingEnv, EnvConfig  # noqa: E402
+from src.env.aircraft_env import AIRCRAFT_PRESETS, DEFAULT_AIRCRAFT, CrosswindLandingEnv, EnvConfig, make_env_config  # noqa: E402
 from src.utils.telemetry import TelemetryRecorder, export_json, trajectory_arrays  # noqa: E402
 
 # ----------------------------------------------------------------------------- style
@@ -137,10 +137,12 @@ class PPOPolicy:
     def __init__(self, model_path: str, vecnormalize_path: Optional[str], device: str = "cpu") -> None:
         from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-        from src.agents.train_ppo import find_vecnormalize, load_ppo, run_action_mode
+        from src.agents.train_ppo import find_vecnormalize, load_ppo, run_settings
 
         self.model = load_ppo(model_path, device=device)
-        self.action_mode, self.residual_scale = run_action_mode(model_path)
+        settings = run_settings(model_path)
+        self.action_mode, self.residual_scale = settings["action_mode"], settings["residual_scale"]
+        self.aircraft = settings["aircraft"]
         stats = Path(vecnormalize_path) if vecnormalize_path else find_vecnormalize(model_path)
         self.vecnorm = VecNormalize.load(str(stats), DummyVecEnv([CrosswindLandingEnv]))
         self.vecnorm.training = False
@@ -164,8 +166,9 @@ class EpisodeResult:
     arrays: dict[str, np.ndarray]
 
 
-def run_episode(policy: Policy, crosswind: float, seed: int, telemetry_dir: Optional[Path]) -> EpisodeResult:
-    cfg = EnvConfig(action_mode=policy.action_mode, residual_scale=policy.residual_scale)
+def run_episode(policy: Policy, crosswind: float, seed: int, telemetry_dir: Optional[Path],
+                aircraft: str = DEFAULT_AIRCRAFT) -> EpisodeResult:
+    cfg = make_env_config(aircraft, action_mode=policy.action_mode, residual_scale=policy.residual_scale)
     env = TelemetryRecorder(CrosswindLandingEnv(cfg), extra_metadata={"policy": policy.name, "action_mode": policy.action_mode})
     obs, _ = env.reset(seed=seed, options={"wind_speed_mps": abs(crosswind), "wind_from_deg": 90.0 if crosswind >= 0 else -90.0})
     policy.reset(env.unwrapped)
@@ -181,13 +184,14 @@ def run_episode(policy: Policy, crosswind: float, seed: int, telemetry_dir: Opti
 
 
 def evaluate(
-    policy: Policy, crosswinds: list[float], episodes: int, base_seed: int, telemetry_dir: Optional[Path]
+    policy: Policy, crosswinds: list[float], episodes: int, base_seed: int, telemetry_dir: Optional[Path],
+    aircraft: str = DEFAULT_AIRCRAFT,
 ) -> list[EpisodeResult]:
     results = []
     for i, xw in enumerate(crosswinds):
         for k in range(episodes):
             seed = base_seed + 1000 * i + k
-            r = run_episode(policy, xw, seed, telemetry_dir)
+            r = run_episode(policy, xw, seed, telemetry_dir, aircraft)
             results.append(r)
             m = r.metrics
             print(
@@ -453,6 +457,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("--model", help="Path to a PPO .zip checkpoint")
     p.add_argument("--vecnormalize", help="Path to VecNormalize .pkl (auto-detected if omitted)")
     p.add_argument("--policy", choices=("ppo", "baseline"), default=None)
+    p.add_argument("--aircraft", choices=tuple(AIRCRAFT_PRESETS), default=None,
+                   help="airframe preset (default: the checkpoint's, else atr72)")
     p.add_argument("--run-dir", help="Training run directory (for reward convergence curves)")
     p.add_argument("--crosswinds", type=float, nargs="+", default=[0.0, 2.5, 5.0, 7.5, 10.0])
     p.add_argument("--episodes", type=int, default=20, help="episodes per crosswind level")
@@ -475,8 +481,10 @@ def main(argv: Optional[list[str]] = None) -> None:
         plot_reward_convergence(Path(a.run_dir), out_dir, formats)
 
     policy: Policy = PPOPolicy(a.model, a.vecnormalize, a.device) if kind == "ppo" else BaselinePolicy()
+    aircraft = a.aircraft or getattr(policy, "aircraft", None) or DEFAULT_AIRCRAFT
+    print(f"aircraft preset: {aircraft}")
     telemetry_dir = out_dir / "telemetry" if a.telemetry else None
-    results = evaluate(policy, a.crosswinds, a.episodes, a.seed, telemetry_dir)
+    results = evaluate(policy, a.crosswinds, a.episodes, a.seed, telemetry_dir, aircraft)
 
     df = metrics_frame(results)
     df.to_csv(out_dir / f"episodes_{policy.name}.csv", index=False)
@@ -487,7 +495,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     with pd.option_context("display.width", 160, "display.max_columns", 20):
         print(summary.round(3))
 
-    env_cfg = EnvConfig()
+    env_cfg = make_env_config(aircraft)
     plot_trajectories_3d(results, env_cfg, out_dir, formats)
     plot_trajectory_profiles(results, env_cfg, out_dir, formats)
     plot_touchdown_dispersion(df, env_cfg, out_dir, formats)

@@ -14,7 +14,9 @@ pattern used for certifying learning-enabled flight controls:
   to the fallback when a violation is predicted and latches the fallback until the
   state has stayed inside the envelope for a dwell time. Authority is rate-limited, so the commanded action is a smooth blend
   ``a = lambda * a_primary + (1 - lambda) * a_fallback``. Below the flare gate the
-  fallback keeps authority once it has taken it (no hand-backs in the flare).
+  fallback keeps authority once it has taken it (no hand-backs in the flare), and a
+  primary that has been overridden ``max_reversions`` times in one approach is locked out
+  for the rest of it (a heavy aircraft cannot afford to lose height on every hand-back).
 
 The per-step authority ``lambda`` and the active monitor reason are exposed for
 telemetry so that every rollout states exactly who was flying.
@@ -29,27 +31,61 @@ from typing import Callable, Optional
 import numpy as np
 
 from src.agents.baseline_autopilot import ClassicalAutopilot
-from src.env.aircraft_env import CrosswindLandingEnv
+from src.env.aircraft_env import CrosswindLandingEnv, aircraft_key
 
 
 @dataclass
 class EnvelopeConfig:
+    """Envelope limits. Defaults: Cessna-172-class aircraft (original tuning)."""
+
     lookahead_s: float = 1.0
-    bank_limit_high_deg: float = 30.0  # above 60 m AGL
+    schedule_height_m: float = 60.0  # bank and sink limits relax linearly up to this height
+    bank_limit_high_deg: float = 30.0  # at and above schedule_height_m
     bank_limit_low_deg: float = 10.0  # at the runway
     pitch_min_deg: float = -10.0
     pitch_max_deg: float = 14.0
     alpha_max_deg: float = 11.0
     airspeed_margin_mps: float = 5.0  # below V_ref
-    sink_limit_high_mps: float = 4.0  # above 60 m AGL
+    sink_limit_high_mps: float = 4.0  # at and above schedule_height_m
     sink_limit_low_mps: float = 1.2  # at the runway
     gs_dev_base_m: float = 10.0
     gs_dev_per_m: float = 0.05
     loc_dev_base_m: float = 12.0
     loc_dev_per_m: float = 0.03
-    flare_gate_m: float = 15.0
+    flare_gate_m: float = 15.0  # wheel height
     dwell_s: float = 3.0
     authority_rate_per_s: float = 2.5
+    max_reversions: int = 10**9  # fallbacks per approach before the primary is locked out
+
+
+CESSNA_172_ENVELOPE = EnvelopeConfig()
+
+# ATR 72-600: pitch bounded by the tail-strike attitude, bank by the propeller clearance,
+# sink limits sized for a 2.9-3.6 m/s approach sink rate, a higher flare gate.
+ATR_72_ENVELOPE = EnvelopeConfig(
+    schedule_height_m=90.0,
+    bank_limit_high_deg=25.0,
+    bank_limit_low_deg=7.0,
+    pitch_min_deg=-8.0,
+    pitch_max_deg=8.0,
+    alpha_max_deg=11.5,
+    airspeed_margin_mps=5.0,
+    sink_limit_high_mps=6.5,
+    sink_limit_low_mps=2.0,
+    gs_dev_base_m=10.0,
+    gs_dev_per_m=0.012,  # about 0.7 deg, two dots of glideslope
+    loc_dev_base_m=15.0,
+    loc_dev_per_m=0.03,
+    flare_gate_m=25.0,
+    max_reversions=3,
+)
+
+ENVELOPE_BY_AIRCRAFT: dict[str, EnvelopeConfig] = {"atr72": ATR_72_ENVELOPE, "cessna172": CESSNA_172_ENVELOPE}
+
+
+def envelope_for_aircraft(env: CrosswindLandingEnv) -> EnvelopeConfig:
+    """Envelope tuned for the environment's airframe (Cessna limits for an unknown airframe)."""
+    return ENVELOPE_BY_AIRCRAFT.get(aircraft_key(env.cfg.aircraft), CESSNA_172_ENVELOPE)
 
 
 class SafetySupervisor:
@@ -64,7 +100,7 @@ class SafetySupervisor:
     ) -> None:
         self.env = env
         self.primary = primary
-        self.cfg = config or EnvelopeConfig()
+        self.cfg = config or envelope_for_aircraft(env)
         # In residual action mode the environment already runs the classical autoland under the
         # policy, so falling back means commanding a zero residual.
         self.residual = env.cfg.action_mode == "residual"
@@ -77,11 +113,12 @@ class SafetySupervisor:
         self.latched_until = -1.0
         self.reason: Optional[str] = None
         self.flare_lock = False
+        self.reversions = 0
+        self.locked_out = False
 
     # ----------------------------------------------------------------- monitor
-    @staticmethod
-    def _schedule(h: float, high: float, low: float) -> float:
-        u = min(max(h / 60.0, 0.0), 1.0)
+    def _schedule(self, h: float, high: float, low: float) -> float:
+        u = min(max(h / self.cfg.schedule_height_m, 0.0), 1.0)
         return low + (high - low) * u
 
     def violation(self) -> Optional[str]:
@@ -124,18 +161,22 @@ class SafetySupervisor:
         a_primary = np.asarray(self.primary(obs), dtype=np.float64)
 
         reason = self.violation()
-        h_wheel = env._kinematics()["h"] - 1.0
+        h_wheel = env._kinematics()["h"] - env.wheel_height_m
         if reason is not None:
             # Any predicted violation (re-)arms the dwell latch: authority stays with the
             # fallback until the state has been inside the envelope for ``dwell_s``.
+            if t >= self.latched_until:
+                self.reversions += 1
+                if self.reversions >= c.max_reversions:
+                    self.locked_out = True
             self.reason = reason
             self.latched_until = t + c.dwell_s
         target = 0.0 if t < self.latched_until else 1.0
         if h_wheel < c.flare_gate_m and (self.authority < 0.999 or reason is not None):
             self.flare_lock = True  # no hand-back to the primary inside the flare gate
-        if self.flare_lock:
+        if self.flare_lock or self.locked_out:
             target = 0.0
-            self.reason = self.reason or "flare_gate"
+            self.reason = self.reason or ("flare_gate" if self.flare_lock else "locked_out")
         elif target == 1.0:
             self.reason = None
         step = c.authority_rate_per_s * dt

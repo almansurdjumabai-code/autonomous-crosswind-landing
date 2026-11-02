@@ -1,9 +1,8 @@
 {
-  "name": "alma-autoland-mission-control",
+  "name": "crosswind-autoland-mission-console",
   "private": true,
-  "version": "1.0.0",
-  "description": "ALMA-AUTOLAND: Autonomous 6DoF Crosswind Landing Dynamics & Guidance Framework — WebGL mission control",
-  "author": "Almansur Jumabay",
+  "version": "1.1.0",
+  "description": "Autonomous crosswind landing (ATR 72-600 and Cessna 172 presets): 6DoF simulator rollouts replayed in a WebGL mission console",
   "type": "module",
   "scripts": {
     "dev": "vite",

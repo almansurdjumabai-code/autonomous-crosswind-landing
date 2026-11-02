@@ -18,8 +18,12 @@ Features
 
 Usage::
 
-    python -m src.agents.train_ppo --total-timesteps 5000000 --n-envs 8 --run-dir runs/ppo_xwind
+    python -m src.agents.train_ppo --total-timesteps 5000000 --n-envs 8 --run-dir runs/ppo_atr72
+    python -m src.agents.train_ppo --aircraft cessna172 --run-dir runs/ppo_cessna   # original airframe
     tensorboard --logdir runs
+
+The aircraft preset (``--aircraft``, default ``atr72``) is stored in the run's ``config.json``
+so that evaluation and export rebuild the same environment.
 """
 
 from __future__ import annotations
@@ -56,7 +60,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv, VecNormalize
 
-from src.env.aircraft_env import CrosswindLandingEnv, EnvConfig, make_env_config
+from src.env.aircraft_env import AIRCRAFT_PRESETS, DEFAULT_AIRCRAFT, CrosswindLandingEnv, EnvConfig, make_env_config
 
 
 # =============================================================================
@@ -88,6 +92,7 @@ class PPOHyperparameters:
 @dataclass
 class TrainConfig:
     run_dir: str = "runs/ppo_crosswind"
+    aircraft: str = DEFAULT_AIRCRAFT  # key into AIRCRAFT_PRESETS
     total_timesteps: int = 5_000_000
     n_envs: int = 8
     seed: int = 42
@@ -180,17 +185,30 @@ def find_vecnormalize(model_path: str | Path) -> Path:
     raise FileNotFoundError(f"No VecNormalize statistics found for {model_path}; tried {[str(c) for c in candidates]}")
 
 
-def run_action_mode(model_path: str | Path) -> tuple[str, float]:
-    """Action mode a checkpoint was trained with, read from the run's ``config.json``.
+def run_settings(model_path: str | Path) -> dict[str, Any]:
+    """Environment settings a checkpoint was trained with, read from the run's ``config.json``:
+    ``action_mode``, ``residual_scale`` and ``aircraft``.
 
-    Checkpoints from runs that predate the setting were trained with absolute actions.
+    Checkpoints from runs that predate a setting get its historical default: absolute actions,
+    and the Cessna-172-class airframe the project started with.
     """
+    train: dict[str, Any] = {}
     for parent in list(Path(model_path).resolve().parents)[:3]:
         cfg = parent / "config.json"
         if cfg.exists():
             train = json.loads(cfg.read_text(encoding="utf-8")).get("train", {})
-            return train.get("action_mode", "absolute"), float(train.get("residual_scale", 0.3))
-    return "absolute", 0.3
+            break
+    return {
+        "action_mode": train.get("action_mode", "absolute"),
+        "residual_scale": float(train.get("residual_scale", 0.3)),
+        "aircraft": train.get("aircraft", "cessna172"),
+    }
+
+
+def run_action_mode(model_path: str | Path) -> tuple[str, float]:
+    """Action mode and residual scale a checkpoint was trained with (see :func:`run_settings`)."""
+    s = run_settings(model_path)
+    return s["action_mode"], s["residual_scale"]
 
 
 def load_ppo(path: str | Path, env: Optional[VecEnv] = None, device: str = "auto", **kwargs: Any) -> PPO:
@@ -369,7 +387,7 @@ def train(cfg: TrainConfig) -> Path:
     set_random_seed(cfg.seed)
 
     env_cfg = make_env_config(
-        max_wind_speed_mps=cfg.max_wind_speed_mps, action_mode=cfg.action_mode, residual_scale=cfg.residual_scale
+        cfg.aircraft, max_wind_speed_mps=cfg.max_wind_speed_mps, action_mode=cfg.action_mode, residual_scale=cfg.residual_scale
     )
     env_cfg.reward = type(env_cfg.reward)(**{**asdict(env_cfg.reward), "gamma": cfg.ppo.gamma})
 
@@ -449,6 +467,8 @@ def parse_args(argv: Optional[list[str]] = None) -> TrainConfig:
     d = TrainConfig()
     hp = PPOHyperparameters()
     p.add_argument("--run-dir", default=d.run_dir)
+    p.add_argument("--aircraft", choices=tuple(AIRCRAFT_PRESETS), default=d.aircraft,
+                   help="airframe preset: atr72 (ATR 72-600, default) or cessna172 (original experiments)")
     p.add_argument("--total-timesteps", type=int, default=d.total_timesteps)
     p.add_argument("--n-envs", type=int, default=d.n_envs)
     p.add_argument("--seed", type=int, default=d.seed)
@@ -487,6 +507,7 @@ def parse_args(argv: Optional[list[str]] = None) -> TrainConfig:
     )
     return TrainConfig(
         run_dir=a.run_dir,
+        aircraft=a.aircraft,
         total_timesteps=a.total_timesteps,
         n_envs=a.n_envs,
         seed=a.seed,

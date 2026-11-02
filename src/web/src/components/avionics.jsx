@@ -246,7 +246,7 @@ export function HeadingTape({ heading, track, width = 300 }) {
 /* ---------------------------------------------------------------------------------------------- */
 /* Full-screen head-up display for the cockpit camera (conformal with a 62 deg vertical FOV).      */
 /* ---------------------------------------------------------------------------------------------- */
-export function CockpitHUD({ s, width, height, vfovDeg = 62, glidepathDeg = 3 }) {
+export function CockpitHUD({ s, width, height, vfovDeg = 62, glidepathDeg = 3, crashSink = -1.5 }) {
   if (!s) return null;
   const cx = width / 2;
   const cy = height / 2;
@@ -317,7 +317,7 @@ export function CockpitHUD({ s, width, height, vfovDeg = 62, glidepathDeg = 3 })
           <rect x="-56" y="-16" width="112" height="32" fill="rgb(0 0 0 / 0.25)" stroke={HUD} strokeWidth="1.4" />
           <text x="0" y="7" fill={HUD} fontSize="20" fontWeight="700" textAnchor="middle" className="readout">{altFt.toFixed(0)}</text>
           <text x="0" y="34" fill={HUD} fontSize="11" textAnchor="middle">RA FT</text>
-          <text x="0" y="56" fill={s.vz < -1.5 ? WARNING : HUD} fontSize="13" textAnchor="middle" className="readout">VS {s.vz.toFixed(1)}</text>
+          <text x="0" y="56" fill={s.vz < crashSink ? WARNING : HUD} fontSize="13" textAnchor="middle" className="readout">VS {s.vz.toFixed(1)}</text>
         </g>
         <g transform={`translate(0 ${cy - 80})`}>
           <text x="0" y="0" fill={HUD} fontSize="14" textAnchor="middle" className="readout">
