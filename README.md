@@ -106,7 +106,7 @@ python -m src.viz.export_flight_data --aircraft atr72 --model runs/ppo_atr72/bes
 python -m src.viz.report_experiment --model report/model_snapshot/best/best_model.zip   # Cessna snapshot
 ```
 
-The aircraft preset is written to each run's `config.json`; evaluation and export rebuild the same environment and refuse a checkpoint trained on another preset.
+The aircraft preset is written to each run's `config.json`; evaluation and export rebuild the same environment and refuse a checkpoint trained on another preset. The chain has been exercised end to end on the ATR preset with a short CPU smoke run (6k steps, residual mode): training, checkpoint and VecNormalize saving, export of the three controllers to the console format, the preset-mismatch refusal, and the evaluation figures. A real training run (millions of steps) still has to be done on a GPU machine.
 
 ## Bridge to the FFS digital twin
 
