@@ -1,8 +1,12 @@
 # Technical documentation
 
 A reinforcement-learning codebase for training and evaluating autonomous landing
-controllers for a Cessna-172-class aircraft in crosswind, wind shear and turbulence.
-It includes:
+controllers in crosswind, wind shear and turbulence. The default airframe is an
+**ATR 72-600** regional turboprop in landing configuration (preset `atr72`); the
+Cessna-172-class aircraft of the original experiments is kept as preset `cessna172`.
+Every component that depends on the airframe (approach speed, episode geometry,
+autoland gains, envelope limits, reward tolerances, console instruments) reads it
+from the preset. It includes:
 
 - a non-linear six-degree-of-freedom rigid-body simulator wrapped as a Gymnasium environment,
 - a reward function that combines potential-based shaping with sparse touchdown terms,
@@ -68,6 +72,36 @@ obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
 `reset` accepts these `options`: `wind_speed_mps`, `wind_from_deg` (relative to the
 runway; +90 is a direct crosswind from the right), `turbulence` (bool), `gusts` (bool),
 `start_x_m` and `start_y_m`.
+
+### Aircraft presets
+
+```python
+from src.env.aircraft_env import AIRCRAFT_PRESETS, make_env_config
+
+cfg = make_env_config("atr72", max_wind_speed_mps=12.0)   # EnvConfig() is the same preset
+cfg = make_env_config("cessna172")                         # original light aircraft
+```
+
+A preset (`AircraftPreset`) bundles the `AircraftParameters` (mass, inertia, aerodynamics,
+propulsion, actuators, gear and strike points), the runway, the `EnvConfig` operating point
+(approach speed, start geometry, envelope speeds) and the `RewardConfig` tolerances.
+`make_env_config` routes extra keyword arguments to the wind, runway, reward or
+environment configuration by field name. The autoland (`gains_for_aircraft`) and the
+Simplex monitor (`envelope_for_aircraft`) pick their tuning from `aircraft_key(cfg.aircraft)`,
+and `train_ppo --aircraft` stores the key in the run's `config.json` so that evaluation and
+export rebuild the same environment.
+
+| | `atr72` (default) | `cessna172` |
+|---|---|---|
+| Mass, wing | 21 000 kg, 61.0 m², 27.05 m, c = 2.30 m | 1043 kg, 16.2 m², 10.92 m, c = 1.49 m |
+| Inertia (kg m²) | 2.3e5, 5.5e5, 7.2e5 (estimated) | 1285, 1825, 2667 |
+| Approach speed | 55 m/s (107 kt), flaps 30 | 33 m/s |
+| Start | 3000–4500 m out, ±60 m, σ_h = 8 m | 1500–2200 m, ±40 m, σ_h = 6 m |
+| Envelope speeds | 38–100 m/s | 18–70 m/s |
+| Runway | 2500 × 45 m, aim point 300 m | 1600 × 30 m, aim point 300 m |
+| Wheel height below the CG | 2.55 m (0.22 m static compression) | 1.0 m |
+| Hard landing | sink below −2.5 m/s | below −1.5 m/s |
+| Strike points | propellers (1.25 m clearance), wing tips, tail (≈ 7° compressed) | wing tips, tail |
 
 ---
 
@@ -193,7 +227,19 @@ $T=\delta_t\,T_{\text{static}}\,\tfrac{\rho}{\rho_0}\max\left(0,1-V_a/V_{T=0}\ri
 limit. The time constants are 0.06 s for the control surfaces and 0.4 s for the engine.
 The surface rate limit is $80^\circ$/s.
 
-The aircraft data (Cessna 172 class, Roskam / Stevens & Lewis) are set in `AircraftParameters`:
+The aircraft data are set in `AircraftParameters`. The default is the ATR 72-600 in landing
+configuration (flaps 30, gear down): $m=21\,000$ kg, $S=61.0$ m², $b=27.05$ m, $c=2.30$ m,
+$I_{xx},I_{yy},I_{zz}=2.3\times10^5,\,5.5\times10^5,\,7.2\times10^5$ kg m² (estimated from
+radii of gyration of twin-turboprop regional aircraft), $C_{L_0}=1.25$, $C_{L_\alpha}=5.8$,
+$\alpha_{\text{stall}}=14.3^\circ$ (so $C_{L\max}\approx2.7$ and $V_{REF}/V_S\approx1.22$ at
+55 m/s), $C_{D_0}=0.085$, $C_{m_0}=-0.12$, $C_{m_\alpha}=-1.35$, $C_{m_q}=-32$,
+$C_{m_{\delta_e}}=-1.75$, $C_{Y_\beta}=-0.80$, $C_{n_\beta}=0.15$, $C_{n_{\delta_r}}=-0.10$,
+$C_{l_\beta}=-0.11$, $C_{l_{\delta_a}}=0.13$. Thrust: two PW127M, 56 kN static with a 190 m/s
+zero-thrust speed (about 40 kN at $V_{REF}$). Actuators: 0.10 s surfaces at 40°/s (autopilot
+servo rates), 1.0 s power response. These derivatives are a landing-configuration estimate
+consistent with the published geometry and certified speeds, not ATR flight-test data.
+
+The `cessna172` preset keeps the original Cessna 172 class data (Roskam / Stevens & Lewis):
 $m=1043$ kg, $S=16.2$ m², $b=10.92$ m, $c=1.49$ m,
 $I_{xx},I_{yy},I_{zz}=1285,\,1825,\,2667$ kg m².
 
@@ -266,16 +312,22 @@ $$
 
 The forces are rotated into body axes and contribute moments $\mathbf r_i\times\mathbf F_i$.
 The smooth $\tanh$ Coulomb model keeps the system Lipschitz-continuous, which keeps RK4
-well behaved. Structural contact points (wingtips and tail) and a minimum fuselage height
-are used to detect strikes.
+well behaved. Structural contact points and a minimum CG height (`fuselage_clearance_m`)
+are used to detect strikes; they are checked in the order listed in the preset. For the
+ATR 72 the propeller discs touch first in a bank (about 15° with the struts compressed),
+then the wing tips (about 17°); the aft fuselage touches at about 7° of pitch. `wheel_height_m`
+(the CG height with the main wheels just touching) is what the autoland and the monitor
+subtract from the CG height to measure the wheel height: 2.55 m on the ATR, 1.0 m on the Cessna.
 
 ### 1.7 Trim
 
-The initial state is a wings-level, steady $3^\circ$ glide at $V_a=33$ m/s. It is found by
-solving $\dot u=\dot w=\dot q=0$ for $(\alpha,\delta_e,\delta_t)$ by bounded nonlinear
-least squares. The solution is
+The initial state is a wings-level, steady $3^\circ$ glide at the preset's approach speed.
+It is found by solving $\dot u=\dot w=\dot q=0$ for $(\alpha,\delta_e,\delta_t)$ by bounded
+nonlinear least squares. For the ATR 72 at $V_a=55$ m/s the solution is
+$\alpha\approx6.3^\circ$, $\theta\approx3.3^\circ$, $\delta_e\approx-8.8^\circ$ and
+$\delta_t\approx0.33$; for the Cessna at 33 m/s it is
 $\alpha\approx7.6^\circ$, $\theta\approx4.6^\circ$, $\delta_e\approx-6.0^\circ$ and
-$\delta_t\approx0.29$, with a residual below $10^{-13}$.
+$\delta_t\approx0.29$. Both have a residual below $10^{-13}$.
 
 ---
 
@@ -315,22 +367,23 @@ Training also applies `VecNormalize` running normalisation.
 
 ### 2.4 Episode
 
-- **Start:** the aircraft starts 1500–2200 m before the threshold, on the glideslope
-  ($\sigma_h=6$ m), with lateral offset $\pm40$ m, heading $\pm8^\circ$, bank $\pm5^\circ$ and
-  airspeed $\pm2$ m/s. The wind is $W_{20}\sim\mathcal U(0,W_{\max}\cdot\text{severity})$ from
-  $\pm[30^\circ,150^\circ]$, with turbulence and gusts enabled.
+- **Start:** the aircraft starts 3000–4500 m before the threshold (ATR; 1500–2200 m for the
+  Cessna), on the glideslope ($\sigma_h=8$ m; 6 m), with lateral offset $\pm60$ m ($\pm40$ m),
+  heading $\pm8^\circ$, bank $\pm5^\circ$ and airspeed $\pm3$ m/s ($\pm2$ m/s). The wind is
+  $W_{20}\sim\mathcal U(0,W_{\max}\cdot\text{severity})$ from $\pm[30^\circ,150^\circ]$, with
+  turbulence and gusts enabled.
 - **Touchdown:** detected as the first gear contact, at 100 Hz resolution. It is a crash
   if any of these hold:
-  - $\dot h<-1.5$ m/s,
+  - $\dot h<-2.5$ m/s on the ATR ($-1.5$ m/s on the Cessna),
   - the nose gear touches first,
   - the aircraft touches down before the threshold,
   - the aircraft touches down outside the runway edges.
 - **Success:** 3 s of rollout after touchdown without a crash.
 - **Other crashes:**
-  - a wingtip, tail or fuselage strike,
+  - a propeller, wingtip, tail or fuselage strike,
   - $|\phi|>70^\circ$ or $|\theta|>40^\circ$,
-  - $V_a<18$ m/s (stall) or $V_a>70$ m/s,
-  - $|y|>400$ m or $h>500$ m,
+  - $V_a<38$ m/s (stall) or $V_a>100$ m/s on the ATR ($18$ and $70$ m/s on the Cessna),
+  - $|y|>500$ m or $h>600$ m ($400$ m and $500$ m),
   - overflying the runway end while airborne,
   - a runway excursion or overrun during rollout,
   - a non-finite state.
@@ -436,13 +489,14 @@ The grid is crosswind 0–30 kt × gust intensity 0/50/100 % × glidepath 2.5/3.
 **Classical autoland.** It mirrors airline technique:
 
 - **Wind estimation:** inertial velocity minus the air-velocity vector built from Va, α and β.
-- **Speed:** the approach speed is gust-adjusted, Vref + min(0.5·gust + 0.12·crosswind, 6 m/s), and power is held through the flare.
-- **Flare:** a dedicated faster sink-rate loop.
-- **Stall protection:** an angle-of-attack limit caps the pitch command at α ≤ 12°. Before this, gusts could drive the aircraft into a 45° deep stall that hit the ground at −27 m/s.
-- **De-crab:** a partial de-crab limits sideslip to 12°, so the aircraft keeps a small residual crab instead of losing lift. The old full de-crab needed 25–30° of sideslip at 25 kt.
-- **Lateral:** wing-low to hold the centreline.
+- **Speed:** the approach speed is gust-adjusted, Vref + min(0.5·gust + k·crosswind, cap) (6 m/s cap on the Cessna, 7.5 m/s on the ATR), and power is held through the flare; in smooth air the flare bleeds `flare_speed_bleed_mps` (4 m/s Cessna, 2 m/s ATR).
+- **Flare:** a dedicated faster sink-rate loop. The exponential law ḣ_cmd = −h_wheel/τ − ḣ_td is never allowed to ask for a steeper descent than the approach, and on the ATR the time constant is recomputed at flare entry so the command is continuous with the approach sink rate (`flare_continuous_entry`): without this the law asked for a deeper descent at entry and the aircraft pitched down into the ground. The integral term is rescaled when the flare gains take over, so the pitch command does not jump. On the ATR the pitch command is also rate-limited (6°/s) and floored at +1° once the flare has started, so gust-induced vertical-speed errors do not drive the nose below the horizon metres above the runway.
+- **Stall protection:** an angle-of-attack limit caps the pitch command (α ≤ 12° on both presets; the ATR model stalls at 14.3°). Before this, gusts could drive the Cessna into a 45° deep stall that hit the ground at −27 m/s.
+- **Tail-strike protection (ATR):** the pitch command is capped at 6.5° in the flare (tail strike at about 7° with the struts compressed) and at 10° on the approach, where a higher attitude is needed to recapture the glideslope from below.
+- **De-crab:** a partial de-crab limits sideslip (12° Cessna, 10° ATR), so the aircraft keeps a small residual crab instead of losing lift. The ATR starts it at 10 m of wheel height because its yaw response is slower.
+- **Lateral:** wing-low to hold the centreline (8° Cessna, 5° ATR: propeller clearance), wings level after touchdown.
 
-All steady crosswinds up to 30 kt now land. The remaining failures are in severe turbulence (100 % gusts at 15 kt and above), against the −1.5 m/s crash criterion.
+Heights in the autoland and the monitor are wheel heights (`env.wheel_height_m` below the CG). All steady crosswinds up to 35 kt land on the ATR and up to 30 kt on the Cessna. The remaining failures are hard landings in severe turbulence (50–100 % gusts at 15–30 kt): 33–34 of 40 Monte-Carlo approaches land on the ATR at 0–30 kt with 50 % gusts, 35 of 40 on the Cessna.
 
 **Runtime assurance (Simplex).** PPO flies while an envelope monitor checks the state 1 s ahead:
 
@@ -452,7 +506,7 @@ All steady crosswinds up to 30 kt now land. The remaining failures are in severe
 - airspeed;
 - glideslope and localizer deviation.
 
-When it predicts a violation, authority blends to the autoland at 2.5/s and stays latched for 3 s. Inside the 15 m flare gate it never hands authority back. Every rollout records the per-frame authority λ and the monitor that triggered.
+When it predicts a violation, authority blends to the autoland at 2.5/s and stays latched for 3 s. Inside the flare gate (15 m of wheel height on the Cessna, 25 m on the ATR) it never hands authority back, and on the ATR a primary that has been overridden three times in one approach is locked out for the rest of it (`max_reversions`): each hand-back to a diving policy costs a 21 t aircraft 10–15 m of height that its autoland recaptures slowly. The limits are scheduled by altitude up to 60 m (Cessna) or 90 m (ATR); the ATR set bounds pitch by the tail-strike attitude (−8°, +8°), bank by the propeller clearance (7° at the runway, 25° high), sink rate by the 2.9–3.6 m/s approach sink (2.0 m/s at the runway, 6.5 m/s high) and the glideslope by two dots (10 m + 0.012 m per metre to the aim point). Every rollout records the per-frame authority λ and the monitor that triggered.
 
 **Residual training (default).** `python -m src.agents.train_ppo` now trains in residual mode: `a = a_autoland + 0.3·a_policy`, with log σ₀ = −1.6. The policy starts from a competent controller and learns bounded corrections. The flare reward now includes a dense sink-rate term. Use `--action-mode absolute` for the old formulation. Evaluation and export read the action mode from the run's `config.json`.
 
@@ -653,17 +707,30 @@ transcode in Remotion.
 This is Stage 4. It connects the Blender scene (Stage 3) to an interactive console built
 with React 19, three.js, @react-three/fiber/drei/postprocessing, Tailwind 4, Framer
 Motion and canvas strip charts. The airframe is a procedural 737-800-class airliner with a fictional
-livery (`src/viz/airliner_model.py`), rendered at true scale on the recorded light-aircraft telemetry;
+livery (`src/viz/airliner_model.py`), rendered at true scale on the recorded telemetry;
 press `F` for the wind and airflow overlay (streamlines computed in Blender, tracers, tip vortices).
+
+**One data set per aircraft.** `public/data/<preset>/flight_data.json` plus its `episodes/`
+folder; the Aircraft section of the control panel (or `?ac=atr72|cessna172`) switches between
+them. The manifest's `aircraft` block carries what the instruments need: the V_REF bug and
+low-speed colour on the airspeed tape, the angle-of-attack warning and stall arcs, the hard-landing
+threshold of the vertical-speed tape, the touchdown annunciator and the outcome panel, the gear-load
+bar scale, and the wheel height below the CG. The recorded position is the simulator's centre of
+gravity, so the 3D airframe is shifted vertically by the difference between its own wheel depth and
+the preset's wheel height, and its wheels meet the runway exactly when the simulator records the
+touchdown. The controller buttons show only the controllers present in the manifest: the ATR set has
+the autoland alone until a policy is trained on that preset; the Cessna set keeps the original PPO rollouts.
 
 ```bash
 # 1) Package the Blender scene as glTF. Builds the scene if needed. Writes scene.glb + scene.rig.json.
 blender -b --python src/viz/export_scene_to_gltf.py -- \
     --telemetry results/telemetry_demo/baseline_xw7.5_s1_00000.json --output src/web/public/models/scene.glb
 
-# 2) Roll out the scenario grid on the 6DoF simulator.
-#    2 controllers × 7 crosswinds × 3 gust levels × 3 glidepaths = 126 rollouts.
-python -m src.viz.export_flight_data --model runs/ppo_crosswind/best/best_model.zip --out src/web/public/data
+# 2) Roll out the scenario grid on the 6DoF simulator, one data set per aircraft preset.
+#    ATR 72: 8 crosswinds (0-35 kt) × 3 gust levels × 3 glidepaths = 72 autoland rollouts;
+#    add --model once a policy has been trained on the preset (3 controllers).
+python -m src.viz.export_flight_data --aircraft atr72 --controllers pid
+python -m src.viz.export_flight_data --aircraft cessna172 --model runs/ppo_crosswind/best/best_model.zip
 
 # 3) Run the console
 cd src/web && npm install && npm run dev        # http://127.0.0.1:5173
@@ -748,7 +815,11 @@ The pixel ratio is never scaled at runtime and never drops below 1.0, so the vie
 
 ## 9. Tests
 
-Run `pytest`. All 40 tests pass. They check:
+Run `pytest`. All 59 tests pass. The aircraft-model, control-stack and hard-landing tests run
+on both presets; `tests/test_aircraft_presets.py` checks the ATR preset itself (default
+configuration, geometry and lift consistency with the certified speeds, trim, tail-strike and
+propeller-strike attitudes, gain and envelope selection, wheel-height-based flare, a 30 kt
+steady-crosswind landing, telemetry naming). They check:
 
 - **Kinematics:** the Euler–quaternion round trip, that $R_{nb}$ is orthonormal and matches
   the ZYX product, and quaternion integration through $\theta=90^\circ$.
@@ -768,8 +839,8 @@ Run `pytest`. All 40 tests pass. They check:
   - A 30 m/s vertical 1-cosine gust gives step-size-converged results.
   - The derivatives stay finite at $V_a=0$, with reversed flow and in 140 m/s gusts.
 - **Ground:** the parked aircraft settles with the summed gear load equal to its weight
-  within 1 %, and the load split satisfies the static moment balance. A 3 m/s sink-rate
-  touchdown is classified as `hard_landing`.
+  within 1 %, and the load split satisfies the static moment balance. A 4 m/s sink-rate
+  touchdown is classified as `hard_landing` on both presets.
 - **Telemetry and reward:**
   - The frame matrices are proper rotations, and the Blender and Three.js poses are
     correct for known attitudes.

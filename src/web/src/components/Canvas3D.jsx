@@ -472,6 +472,13 @@ function FlightEngine({ rigged, episodeRef, simRef }) {
       sim.t = ep.t[0];
       sim.velocity.set(0, 0, 0);
       tmp.prev.set(ep.pos[0], ep.pos[1], ep.pos[2]);
+      // The recorded position is the simulator's centre of gravity. The 3D airframe is one model for
+      // every aircraft preset, so it is shifted vertically by the difference between its own wheel
+      // depth below the origin and the simulated aircraft's wheel height below the CG: the wheels
+      // then meet the runway exactly when the simulator records the touchdown.
+      const wheelHeight = st.manifest?.aircraft?.wheel_height_m;
+      const rigDepth = Math.max(0, ...rigged.gear.filter((g) => g.name !== "nose").map((g) => g.radius - g.rest.y));
+      sim.modelOffsetY = Number.isFinite(wheelHeight) && rigDepth > 0 ? rigDepth - wheelHeight : 0;
     }
     // rAF timestamps jitter by a millisecond or two; at 35 m/s that is visible against the ground.
     // Filter the step, but follow real hitches at once so that the sim clock never drifts from wall time.
@@ -496,7 +503,7 @@ function FlightEngine({ rigged, episodeRef, simRef }) {
 
     // Airframe pose.
     const ac = rigged.aircraft;
-    tmp.v.set(sample.visPos[0], sample.visPos[1], sample.visPos[2]);
+    tmp.v.set(sample.visPos[0], sample.visPos[1] + (sim.modelOffsetY ?? 0), sample.visPos[2]);
     const simDt = sim.t - (sim.lastT ?? sim.t);
     if (simDt > 1e-5) sim.velocity.subVectors(tmp.v, tmp.prev).divideScalar(simDt);
     tmp.prev.copy(tmp.v);

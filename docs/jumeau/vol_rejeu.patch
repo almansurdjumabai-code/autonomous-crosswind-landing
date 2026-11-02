@@ -1,0 +1,139 @@
+diff --git a/interface/vol.js b/interface/vol.js
+index ab564e3..db11883 100644
+--- a/interface/vol.js
++++ b/interface/vol.js
+@@ -8,6 +8,11 @@
+ // de la cabine pour les accélérations qui durent (le poids plaque alors le pilote contre son siège).
+ //
+ // Repère du monde : X le long de la piste (le seuil en X = 0), Y à droite, Z vers le haut, en mètres.
++//
++// Une approche enregistrée par le simulateur 6DoF du dépôt autonomous-crosswind-landing (schéma
++// « atr72-approche-jumeau », python -m src.viz.export_jumeau_trajectory) peut remplacer les lois écrites
++// à la main de la finale et de l'atterrissage : chargerApproche(doc), puis lancer('approche') et
++// lancer('atterrissage') comme d'habitude. Le roulage après les trames enregistrées reste celui d'ici.
+ 
+ const G = 9.81, DEG = Math.PI / 180;
+ const VR = 56, V2 = 62, VAPP = 55;               // m/s (≈ 110, 120 et 107 kt)
+@@ -60,10 +65,22 @@ export class Vol {
+     this.cmd = {};               // commandes du poste voulues par la phase
+     this.dof = { tangage: 0, roulis: 0, lacet: 0, pilonnement: 0, cavalement: 0, embardee: 0 };
+     this.version = 0;            // change à chaque image où l'avion bouge (l'image du visuel est à refaire)
++    this.rejeu = null;           // approche enregistrée (chargerApproche) : trames, index, temps courant
+     this._monde();
+     this.lancer('piste');
+   }
+ 
++  /** Charge une approche enregistrée par le simulateur 6DoF (même repère : X depuis le seuil, Y à droite, h des roues).
++   *  Renvoie false et garde les lois écrites à la main si le document n'est pas du bon schéma. */
++  chargerApproche(doc) {
++    const ok = doc && doc.schema === 'atr72-approche-jumeau' && Array.isArray(doc.frames) && doc.frames.length > 2;
++    this.rejeu = ok ? { doc, frames: doc.frames, t: 0, fini: false } : null;
++    return !!ok;
++  }
++
++  /** La finale et l'atterrissage sont rejoués depuis l'enregistrement (tant qu'il reste des trames). */
++  get rejoue() { return !!this.rejeu && !this.rejeu.fini && (this.phase === 'approche' || this.phase === 'atterrissage'); }
++
+   get libelle() { return PHASES[this.phase] || ''; }
+   get vitesseKt() { return Math.round(this.a.V * 1.944); }
+   get hauteurFt() { return Math.round(this.a.h * 3.281); }
+@@ -83,9 +100,20 @@ export class Vol {
+       this.fini = true;
+     } else if (phase === 'approche') {
+       const d = 1000;
+-      Object.assign(a, { x: VISEE - d, y: 0, h: d * Math.tan(PENTE), psi: 0, theta: 1 * DEG, phi: 0, V: VAPP, vz: -VAPP * Math.tan(PENTE),
+-        gamma: -PENTE, sol: false });
+-      Object.assign(this.cmd, { pl: PL.fi + 0.08, cl: CL.ovrd, volets: 1, train: 1, frein: 0, mancheT: 0, mancheR: 0 });
++      if (this.rejeu) {
++        // on reprend l'enregistrement à 1000 m du point de visée, là où la finale écrite à la main commençait
++        const fr = this.rejeu.frames;
++        let i = fr.findIndex(f => f.x >= VISEE - d);
++        if (i < 0) i = 0;
++        this.rejeu.t = fr[i].t;
++        this.rejeu.fini = false;
++        this._appliquerTrame(fr[i], fr[i]);
++        Object.assign(this.cmd, { cl: CL.ovrd, volets: 1, train: 1, frein: 0 });
++      } else {
++        Object.assign(a, { x: VISEE - d, y: 0, h: d * Math.tan(PENTE), psi: 0, theta: 1 * DEG, phi: 0, V: VAPP, vz: -VAPP * Math.tan(PENTE),
++          gamma: -PENTE, sol: false });
++        Object.assign(this.cmd, { pl: PL.fi + 0.08, cl: CL.ovrd, volets: 1, train: 1, frein: 0, mancheT: 0, mancheR: 0 });
++      }
+       this.gel = true;
+       this.fini = true;
+       this._remettreFiltres();
+@@ -103,13 +131,16 @@ export class Vol {
+     // une phase finie continue (l'avion monte encore après le décollage) jusqu'à la suivante ; arrêté, rien ne bouge
+     if (!this.gel && this.phase !== 'piste' && this.phase !== 'arret') {
+       this.t += dt;
++      const rejoue = this.rejoue;
+       const fin = this['_' + this.phase]?.(dt);
+       if (fin) this.fini = true;
+-      // trajectoire : vitesse le long de la pente, cap
+-      const vh = a.V * Math.cos(a.gamma);
+-      a.x += vh * Math.cos(a.psi) * dt;
+-      a.y += vh * Math.sin(a.psi) * dt;
+-      if (!a.sol) a.h = Math.max(0, a.h + a.vz * dt);
++      // trajectoire : vitesse le long de la pente, cap (l'enregistrement, lui, donne la position directement)
++      if (!rejoue) {
++        const vh = a.V * Math.cos(a.gamma);
++        a.x += vh * Math.cos(a.psi) * dt;
++        a.y += vh * Math.sin(a.psi) * dt;
++        if (!a.sol) a.h = Math.max(0, a.h + a.vz * dt);
++      }
+       this.version++;
+     }
+     this._indices(dt);
+@@ -180,8 +211,53 @@ export class Vol {
+     c.mancheT = vers(c.mancheT, 0.02, 0.06 * dt);
+   }
+ 
++  // ---------------------------------------------------------------- approche enregistrée
++
++  /** Interpole l'état entre deux trames (u dans [0, 1]) et le copie dans a et cmd. */
++  _appliquerTrame(f0, f1, u = 0) {
++    const a = this.a, c = this.cmd;
++    const L = (p, q) => p + (q - p) * u;
++    const etaitEnLAir = !a.sol;
++    Object.assign(a, {
++      x: L(f0.x, f1.x), y: L(f0.y, f1.y), h: Math.max(0, L(f0.h, f1.h)),
++      psi: L(f0.psi, f1.psi), theta: L(f0.theta, f1.theta), phi: L(f0.phi, f1.phi),
++      V: L(f0.V, f1.V), vz: L(f0.vz, f1.vz), gamma: L(f0.gamma, f1.gamma),
++      sol: u < 0.5 ? !!f0.sol : !!f1.sol,
++    });
++    const k = u < 0.5 ? f0.cmd : f1.cmd;
++    if (k) {
++      // manette : 0 = ralenti vol, 1 = pleine puissance dans l'enregistrement ; ici entre les crans FI et montée
++      Object.assign(c, { mancheT: k.mancheT, mancheR: k.mancheR, palonnier: k.palonnier,
++        pl: PL.fi + clamp(k.pl, 0, 1) * (PL.montee - PL.fi) });
++    }
++    if (a.sol && etaitEnLAir && this.phase === 'atterrissage') {
++      this._choc = Math.max(0.35, -Math.min(f0.vz, f1.vz) * 0.7);   // le train touche : à-coup vertical
++      this._toucher = this.t;
++    }
++  }
++
++  /** Avance dans l'enregistrement ; vrai tant qu'il reste des trames. */
++  _rejouer(dt) {
++    const r = this.rejeu, fr = r.frames;
++    r.t += dt;
++    let i = r.i ?? 0;
++    while (i < fr.length - 2 && fr[i + 1].t <= r.t) i++;
++    r.i = i;
++    if (r.t >= fr[fr.length - 1].t) {
++      this._appliquerTrame(fr[fr.length - 1], fr[fr.length - 1]);
++      r.fini = true;                 // la suite (freinage jusqu'à l'arrêt) est jouée par les lois d'ici
++      this.a.sol = true;
++      this.a.h = 0;
++      return false;
++    }
++    const f0 = fr[i], f1 = fr[i + 1];
++    this._appliquerTrame(f0, f1, clamp((r.t - f0.t) / Math.max(f1.t - f0.t, 1e-6), 0, 1));
++    return true;
++  }
++
+   _atterrissage(dt) {
+     const a = this.a, c = this.cmd;
++    if (this.rejeu && !this.rejeu.fini && this._rejouer(dt)) return false;
+     if (!a.sol) {
+       if (a.h > 10) {
+         // sur le plan à 3°, vers le point de visée

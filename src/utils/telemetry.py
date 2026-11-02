@@ -68,6 +68,8 @@ import gymnasium as gym
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from src.env.aircraft_env import aircraft_key
+
 SCHEMA_NAME = "crosswind-landing-telemetry"
 SCHEMA_VERSION = "1.0.0"
 
@@ -293,7 +295,11 @@ class TelemetryRecorder(gym.Wrapper):
                     "B_threejs_model_to_frd": B_THREEJS.tolist(),
                 },
                 "aircraft": {
-                    "name": "Cessna-172-class",
+                    "name": ac.name,
+                    "preset": aircraft_key(ac),
+                    "approach_speed_mps": cfg.approach_speed_mps,
+                    "wheel_height_m": ac.wheel_height_m,
+                    "alpha_stall_deg": math.degrees(ac.alpha_stall_rad),
                     "mass_kg": ac.mass_kg,
                     "span_m": ac.span_m,
                     "chord_m": ac.chord_m,

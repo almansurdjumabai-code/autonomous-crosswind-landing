@@ -4,10 +4,10 @@ import Dashboard from "./components/Dashboard.jsx";
 import StatusBar from "./components/StatusBar.jsx";
 import TopBar from "./components/TopBar.jsx";
 import { CAMERAS, clock, QUALITY, seek, setQuality, ui, useUI } from "./lib/store.js";
-import { loadEpisode, loadManifest, loadRig, snapScenario } from "./lib/flightData.js";
+import { AIRCRAFT, availableControllers, loadEpisode, loadManifest, loadRig, snapScenario } from "./lib/flightData.js";
 
 /**
- * Shareable deep links: ?ctrl=ppo|ppo_raw|pid&xw=15&gust=50&gp=3&t=42.5&cam=3&paused=1&panels=0
+ * Shareable deep links: ?ac=atr72|cessna172&ctrl=ppo|ppo_raw|pid&xw=15&gust=50&gp=3&t=42.5&cam=3&paused=1&panels=0
  * (t is the simulation time to open at; cam is 1-4).
  */
 let pendingSeek = null;
@@ -16,6 +16,7 @@ function deepLink() {
   const num = (k) => (p.has(k) && Number.isFinite(Number(p.get(k))) ? Number(p.get(k)) : null);
   const cam = num("cam");
   return {
+    ac: AIRCRAFT.some((a) => a.id === p.get("ac")) ? p.get("ac") : null,
     ctrl: ["ppo", "ppo_raw", "pid"].includes(p.get("ctrl")) ? p.get("ctrl") : null,
     xw: num("xw"),
     gust: num("gust"),
@@ -27,35 +28,59 @@ function deepLink() {
   };
 }
 
+/** Load the 3D rig once and the data set of the selected aircraft whenever it changes. */
 function useBootstrap() {
   const [rig, setRig] = useState(null);
+  const aircraft = useUI((s) => s.aircraft);
   useEffect(() => {
+    const q = deepLink();
+    if (q.ac && q.ac !== ui.get().aircraft) ui.set({ aircraft: q.ac });
     let cancelled = false;
-    Promise.all([loadManifest(), loadRig()])
-      .then(async ([manifest, rigDoc]) => {
-        if (cancelled) return;
-        const d = manifest.default_episode;
-        const narrow = window.innerWidth < 1100;
-        const q = deepLink();
-        ui.set({
-          manifest,
-          controller: q.ctrl ?? d?.controller ?? "ppo",
-          crosswindKt: q.xw ?? d?.crosswind_kt ?? 10,
-          gustPct: q.gust ?? d?.gust_pct ?? 50,
-          glidepathDeg: q.gp ?? d?.glidepath_deg ?? 3,
-          camera: q.cam ?? "CAM-01",
-          playing: !q.paused,
-          showLeft: q.panels === false ? false : !narrow,
-          showRight: q.panels === false ? false : !narrow,
-        });
-        if (q.t != null) pendingSeek = q.t;
-        setRig(rigDoc);
-      })
+    loadRig()
+      .then((rigDoc) => !cancelled && setRig(rigDoc))
       .catch((err) => ui.set({ error: err.message, loading: false }));
     return () => {
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const first = ui.get().manifest == null;
+    const q = first ? deepLink() : {};
+    if (first && q.ac && q.ac !== aircraft) return undefined; // the deep link is applied first
+    ui.set({ loading: true, error: null });
+    loadManifest(aircraft)
+      .then((manifest) => {
+        if (cancelled) return;
+        const st = ui.get();
+        const d = manifest.default_episode;
+        const controllers = availableControllers(manifest).map((c) => c.id);
+        const wanted = q.ctrl ?? (first ? d?.controller : st.controller) ?? d?.controller;
+        const narrow = window.innerWidth < 1100;
+        ui.set({
+          manifest,
+          episode: null,
+          scenarioId: null,
+          controller: controllers.includes(wanted) ? wanted : (d?.controller ?? controllers[0] ?? "pid"),
+          crosswindKt: q.xw ?? (first ? d?.crosswind_kt : st.crosswindKt) ?? 10,
+          gustPct: q.gust ?? (first ? d?.gust_pct : st.gustPct) ?? 50,
+          glidepathDeg: q.gp ?? (first ? d?.glidepath_deg : st.glidepathDeg) ?? 3,
+          ...(first
+            ? {
+                camera: q.cam ?? "CAM-01",
+                playing: !q.paused,
+                showLeft: q.panels === false ? false : !narrow,
+                showRight: q.panels === false ? false : !narrow,
+              }
+            : {}),
+        });
+        if (first && q.t != null) pendingSeek = q.t;
+      })
+      .catch((err) => ui.set({ error: err.message, loading: false }));
+    return () => {
+      cancelled = true;
+    };
+  }, [aircraft]);
   return rig;
 }
 

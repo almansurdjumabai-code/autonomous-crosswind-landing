@@ -15,13 +15,41 @@ export const DEG = Math.PI / 180;
 const rawCache = new Map();
 const episodeCache = new Map();
 
-export async function loadManifest() {
-  const res = await fetch(`${BASE}data/flight_data.json`);
-  if (!res.ok) throw new Error(`flight_data.json: HTTP ${res.status}`);
+/** Aircraft presets with a recorded data set under `public/data/<id>/`. The first one is the default. */
+export const AIRCRAFT = [
+  { id: "atr72", short: "ATR 72-600", hint: "ATR 72-600 regional turboprop, flaps 30, 21 t landing mass (the aircraft of the FFS6 / FFS10 full-flight simulators)" },
+  { id: "cessna172", short: "CESSNA 172", hint: "Cessna-172-class light aircraft: the original data set of the project" },
+];
+export const DEFAULT_AIRCRAFT = AIRCRAFT[0].id;
+
+/** Instrument limits and labels of the loaded data set, with the original light-aircraft values for
+ * manifests that predate the aircraft block. */
+export function aircraftLimits(manifest) {
+  const a = manifest?.aircraft ?? {};
+  return {
+    key: a.key ?? "cessna172",
+    name: a.name ?? "Cessna 172",
+    massKg: a.mass_kg ?? 1043,
+    vrefKt: a.vref_kt ?? 64.1,
+    minAirspeedMps: a.min_airspeed_mps ?? 18,
+    alphaWarnDeg: a.alpha_warning_deg ?? 12,
+    alphaStallDeg: a.alpha_stall_deg ?? 16,
+    wheelHeightM: a.wheel_height_m ?? 1.0,
+    crashSink: a.crash_sink_rate_mps ?? manifest?.crash_sink_rate_mps ?? -1.5,
+    maxGearLoadN: a.max_gear_load_n ?? 14000,
+    aimPointM: manifest?.runway?.aim_point_m ?? 300,
+  };
+}
+
+export async function loadManifest(aircraft = DEFAULT_AIRCRAFT) {
+  const id = AIRCRAFT.some((a) => a.id === aircraft) ? aircraft : DEFAULT_AIRCRAFT;
+  const res = await fetch(`${BASE}data/${id}/flight_data.json`);
+  if (!res.ok) throw new Error(`data/${id}/flight_data.json: HTTP ${res.status}`);
   const manifest = await res.json();
   if (manifest.schema !== "alma-autoland-flight-data") throw new Error("flight_data.json: unexpected schema");
+  manifest.aircraftId = id;
   if (manifest.default_episode) {
-    rawCache.set(manifest.default_episode.id, manifest.default_episode);
+    rawCache.set(`${id}/${manifest.default_episode.id}`, manifest.default_episode);
   }
   return manifest;
 }
@@ -33,23 +61,25 @@ export async function loadRig() {
 }
 
 export async function loadEpisode(manifest, id) {
-  if (episodeCache.has(id)) return episodeCache.get(id);
-  let raw = rawCache.get(id);
+  const key = `${manifest.aircraftId}/${id}`;
+  if (episodeCache.has(key)) return episodeCache.get(key);
+  let raw = rawCache.get(key);
   if (!raw) {
     const entry = manifest.scenarios.find((s) => s.id === id);
     if (!entry) throw new Error(`unknown scenario ${id}`);
-    const res = await fetch(`${BASE}data/${entry.file}`);
+    const res = await fetch(`${BASE}data/${manifest.aircraftId}/${entry.file}`);
     if (!res.ok) throw new Error(`${entry.file}: HTTP ${res.status}`);
     raw = await res.json();
-    rawCache.set(id, raw);
+    rawCache.set(key, raw);
   }
   const ep = prepareEpisode(raw);
-  episodeCache.set(id, ep);
+  ep.aircraftId = manifest.aircraftId;
+  episodeCache.set(key, ep);
   return ep;
 }
 
-export function rawEpisode(id) {
-  return rawCache.get(id) ?? null;
+export function rawEpisode(manifest, id) {
+  return rawCache.get(`${manifest?.aircraftId}/${id}`) ?? null;
 }
 
 const flat = (rows, width) => {
@@ -308,6 +338,12 @@ export const CONTROLLERS = [
   { id: "ppo_raw", short: "PPO RAW", hint: "PPO policy without protection" },
   { id: "pid", short: "PID AUTOLAND", hint: "Classical crosswind autoland (baseline / fallback)" },
 ];
+
+/** Controllers that have rollouts in the loaded data set (a preset without a trained policy has only the autoland). */
+export function availableControllers(manifest) {
+  const ids = manifest?.grid?.controllers;
+  return ids ? CONTROLLERS.filter((c) => ids.includes(c.id)) : CONTROLLERS;
+}
 
 export function outcomeLabel(metrics) {
   if (!metrics) return { text: "—", tone: "mute" };

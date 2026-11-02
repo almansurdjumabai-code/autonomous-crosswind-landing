@@ -74,6 +74,7 @@ export function setQuality(q) {
 
 export const ui = createStore({
   quality: storedQuality(),
+  aircraft: "atr72", // data set: "atr72" | "cessna172" (see flightData.AIRCRAFT)
   manifest: null,
   episode: null,
   scenarioId: null,
