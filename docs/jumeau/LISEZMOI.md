@@ -36,7 +36,31 @@ python -m src.viz.export_jumeau_trajectory --crosswind-kt 15 --gust-pct 50 --see
   `train` sortis.
 - `vent.total_mps` : vent total (moyen + turbulence + rafale) en NED au niveau de l'avion.
 
-Pour rejouer : au lieu de calculer `a` et `cmd` dans `Vol.avancer`, interpoler la trame à `t` et
-copier `x, y, h, psi, theta, phi, V, vz, gamma, sol` dans `this.a` et `cmd` dans `this.cmd`
-(`pl` à ramener sur les crans `PL`). Les indices de la base de mouvement (`_indices`) se calculent
-alors sur un vol physique.
+## Rejeu dans le jumeau : `vol_rejeu.patch`
+
+`vol_rejeu.patch` modifie `interface/vol.js` du jumeau (il s'applique proprement sur sa branche
+`main` du 23 octobre 2026 : `git apply vol_rejeu.patch` à la racine de `simulateur_3d_depannage`).
+Il ajoute à `Vol` :
+
+- `chargerApproche(doc)` : charge un document de ce schéma (renvoie `false` et garde les lois écrites
+  à la main si le schéma n'est pas reconnu) ;
+- `lancer('approche')` reprend alors l'enregistrement à 1000 m du point de visée (là où la finale
+  écrite à la main commençait), gelé comme avant (`APP INIT REPOS`) ;
+- `lancer('atterrissage')` rejoue les trames (interpolation linéaire, position directe, à-coup du
+  toucher calculé sur la vitesse verticale enregistrée, manette ramenée entre les crans FI et montée) ;
+  quand les trames sont épuisées (3 s après le toucher), le freinage jusqu'à l'arrêt reste celui du jumeau ;
+- `rejoue` (lecture seule) dit si la phase courante vient de l'enregistrement.
+
+La base de mouvement (`_indices`), le visuel (`dessiner`) et la lecture `vitesseKt` / `hauteurFt`
+ne changent pas : ils lisent `a` et `cmd` comme avant. Les autres phases (piste, décollage, virage,
+palier) ne sont pas touchées. Sans `chargerApproche`, le comportement est identique à l'original.
+
+Pour s'en servir dans `lancement.js`, après `this.vol = new Vol()` :
+
+```js
+fetch('approches/approche_atr72_xw15_g050.json').then(r => r.json()).then(doc => this.vol?.chargerApproche(doc));
+```
+
+Test hors navigateur (Node, module copié en `.mjs`) sur `approche_atr72_xw15_g050.json` : finale
+reprise à x = −700 m, 112 kt, 169 ft ; toucher à t = 17,4 s à x = 301 m, 2,2° de crabe résiduel,
+à-coup vertical 0,62 ; trames épuisées à x = 459 m, arrêt par le freinage du jumeau à x = 917 m.
