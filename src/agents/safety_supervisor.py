@@ -176,6 +176,9 @@ class SafetySupervisor:
             self.flare_lock = True  # no hand-back to the primary inside the flare gate
         if self.flare_lock or self.locked_out:
             target = 0.0
+            # Once the dwell of the last violation has run out, name the lock that keeps the fallback flying.
+            if reason is None and t >= self.latched_until:
+                self.reason = "flare_gate" if self.flare_lock else "locked_out"
             self.reason = self.reason or ("flare_gate" if self.flare_lock else "locked_out")
         elif target == 1.0:
             self.reason = None
